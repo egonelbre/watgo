@@ -21,9 +21,7 @@ var wabtWasmvmUnsupportedFixtures = []string{
 	"simd-bitselect.txt",
 	"simd-compare.txt",
 	"simd-lane.txt",
-	"simd-load-store.txt",
 	"simd-shift.txt",
-	"simd-splat.txt",
 	"simd-unary.txt",
 }
 

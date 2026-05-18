@@ -172,7 +172,10 @@ func compileFunction(fn *wasmir.Function) (*function, error) {
 			wasmir.InstrI64Load32S, wasmir.InstrI64Load32U,
 			wasmir.InstrI64Store8, wasmir.InstrI64Store16, wasmir.InstrI64Store32,
 			wasmir.InstrF32Load, wasmir.InstrF32Store,
-			wasmir.InstrF64Load, wasmir.InstrF64Store:
+			wasmir.InstrF64Load, wasmir.InstrF64Store,
+			wasmir.InstrV128Load, wasmir.InstrV128Store,
+			wasmir.InstrV128Load8Splat, wasmir.InstrV128Load16Splat,
+			wasmir.InstrV128Load32Splat, wasmir.InstrV128Load64Splat:
 			if ins.MemoryOffset > maxInt64Uint {
 				return nil, fmt.Errorf("%s at %d: memory offset %d is too large", instrName(ins.Kind), pc, ins.MemoryOffset)
 			}
@@ -266,6 +269,8 @@ func compileFunction(fn *wasmir.Function) (*function, error) {
 			wasmir.InstrDrop, wasmir.InstrNop, wasmir.InstrUnreachable,
 			wasmir.InstrRefIsNull, wasmir.InstrRefAsNonNull,
 			wasmir.InstrRefEq, wasmir.InstrExternConvertAny, wasmir.InstrAnyConvertExtern,
+			wasmir.InstrI8x16Splat, wasmir.InstrI16x8Splat, wasmir.InstrI32x4Splat,
+			wasmir.InstrI64x2Splat, wasmir.InstrF32x4Splat, wasmir.InstrF64x2Splat,
 			wasmir.InstrReturn:
 		case wasmir.InstrEnd:
 			if len(labelStack) == 0 {

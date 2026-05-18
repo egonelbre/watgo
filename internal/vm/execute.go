@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"encoding/binary"
 	"fmt"
 	"math"
 	"math/bits"
@@ -401,6 +402,52 @@ func (e *executor) run() ([]Value, error) {
 			if err := e.inst.memoryStore(ins.index, effective, 8, math.Float64bits(value)); err != nil {
 				return nil, e.instructionError(err)
 			}
+		case wasmir.InstrV128Load:
+			if e.inst == nil {
+				return nil, e.instructionError(fmt.Errorf("instance is nil"))
+			}
+			effective, err := e.popMemoryAddress(ins.index, uint64(ins.bits))
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			bytes, err := e.inst.memory(ins.index, effective, 16)
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			var value [16]byte
+			copy(value[:], bytes)
+			e.push(Value{Type: wasmir.ValueTypeV128, V128: value})
+		case wasmir.InstrV128Store:
+			if e.inst == nil {
+				return nil, e.instructionError(fmt.Errorf("instance is nil"))
+			}
+			value, err := e.popV128()
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			effective, err := e.popMemoryAddress(ins.index, uint64(ins.bits))
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			bytes, err := e.inst.memory(ins.index, effective, 16)
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			copy(bytes, value[:])
+		case wasmir.InstrV128Load8Splat, wasmir.InstrV128Load16Splat,
+			wasmir.InstrV128Load32Splat, wasmir.InstrV128Load64Splat:
+			if e.inst == nil {
+				return nil, e.instructionError(fmt.Errorf("instance is nil"))
+			}
+			effective, err := e.popMemoryAddress(ins.index, uint64(ins.bits))
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			value, err := e.evalV128LoadSplat(ins.kind, ins.index, effective)
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			e.push(Value{Type: wasmir.ValueTypeV128, V128: value})
 		case wasmir.InstrMemorySize:
 			if e.inst == nil {
 				return nil, e.instructionError(fmt.Errorf("instance is nil"))
@@ -731,6 +778,13 @@ func (e *executor) run() ([]Value, error) {
 				return nil, e.instructionError(fmt.Errorf("v128.const index %d out of range", ins.index))
 			}
 			e.push(Value{Type: wasmir.ValueTypeV128, V128: e.fn.v128Consts[ins.index]})
+		case wasmir.InstrI8x16Splat, wasmir.InstrI16x8Splat, wasmir.InstrI32x4Splat,
+			wasmir.InstrI64x2Splat, wasmir.InstrF32x4Splat, wasmir.InstrF64x2Splat:
+			value, err := e.evalV128Splat(ins.kind)
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			e.push(Value{Type: wasmir.ValueTypeV128, V128: value})
 		case wasmir.InstrF64Abs, wasmir.InstrF64Neg, wasmir.InstrF64Sqrt,
 			wasmir.InstrF64Ceil, wasmir.InstrF64Floor, wasmir.InstrF64Trunc, wasmir.InstrF64Nearest:
 			v, err := e.evalF64Unary(ins.kind)
@@ -1824,6 +1878,98 @@ func boolI32(v bool) int32 {
 	return 0
 }
 
+// evalV128Splat evaluates one SIMD splat instruction.
+func (e *executor) evalV128Splat(kind wasmir.InstrKind) ([16]byte, error) {
+	switch kind {
+	case wasmir.InstrI8x16Splat:
+		v, err := e.popI32()
+		if err != nil {
+			return [16]byte{}, err
+		}
+		return splatV128(1, uint64(uint8(v))), nil
+	case wasmir.InstrI16x8Splat:
+		v, err := e.popI32()
+		if err != nil {
+			return [16]byte{}, err
+		}
+		return splatV128(2, uint64(uint16(v))), nil
+	case wasmir.InstrI32x4Splat:
+		v, err := e.popI32()
+		if err != nil {
+			return [16]byte{}, err
+		}
+		return splatV128(4, uint64(uint32(v))), nil
+	case wasmir.InstrI64x2Splat:
+		v, err := e.popI64()
+		if err != nil {
+			return [16]byte{}, err
+		}
+		return splatV128(8, uint64(v)), nil
+	case wasmir.InstrF32x4Splat:
+		v, err := e.popF32()
+		if err != nil {
+			return [16]byte{}, err
+		}
+		return splatV128(4, uint64(math.Float32bits(v))), nil
+	case wasmir.InstrF64x2Splat:
+		v, err := e.popF64()
+		if err != nil {
+			return [16]byte{}, err
+		}
+		return splatV128(8, math.Float64bits(v)), nil
+	default:
+		return [16]byte{}, fmt.Errorf("unsupported splat instruction %s", instrName(kind))
+	}
+}
+
+// evalV128LoadSplat evaluates one SIMD load-splat instruction.
+func (e *executor) evalV128LoadSplat(kind wasmir.InstrKind, memoryIndex uint32, address uint64) ([16]byte, error) {
+	width := v128LoadSplatWidth(kind)
+	if width == 0 {
+		return [16]byte{}, fmt.Errorf("unsupported load splat instruction %s", instrName(kind))
+	}
+	raw, err := e.inst.memoryLoad(memoryIndex, address, width)
+	if err != nil {
+		return [16]byte{}, err
+	}
+	return splatV128(width, raw), nil
+}
+
+// v128LoadSplatWidth returns the byte width read by a SIMD load-splat
+// instruction.
+func v128LoadSplatWidth(kind wasmir.InstrKind) uint32 {
+	switch kind {
+	case wasmir.InstrV128Load8Splat:
+		return 1
+	case wasmir.InstrV128Load16Splat:
+		return 2
+	case wasmir.InstrV128Load32Splat:
+		return 4
+	case wasmir.InstrV128Load64Splat:
+		return 8
+	default:
+		return 0
+	}
+}
+
+// splatV128 fills a v128 value by repeating raw's low width bytes.
+func splatV128(width uint32, raw uint64) [16]byte {
+	var out [16]byte
+	for i := 0; i < len(out); i += int(width) {
+		switch width {
+		case 1:
+			out[i] = byte(raw)
+		case 2:
+			binary.LittleEndian.PutUint16(out[i:i+2], uint16(raw))
+		case 4:
+			binary.LittleEndian.PutUint32(out[i:i+4], uint32(raw))
+		case 8:
+			binary.LittleEndian.PutUint64(out[i:i+8], raw)
+		}
+	}
+	return out
+}
+
 // popMemoryIndexOperand pops an operand whose type follows the indexed
 // memory's address type.
 func (e *executor) popMemoryIndexOperand(memoryIndex uint32) (uint64, error) {
@@ -1978,6 +2124,12 @@ func (e *executor) popF32() (float32, error) {
 func (e *executor) popF64() (float64, error) {
 	v, err := e.popWant(wasmir.ValueTypeF64)
 	return v.F64, err
+}
+
+// popV128 pops the top operand and returns its v128 payload.
+func (e *executor) popV128() ([16]byte, error) {
+	v, err := e.popWant(wasmir.ValueTypeV128)
+	return v.V128, err
 }
 
 // popArgs removes a call's arguments from the operand stack and returns them in

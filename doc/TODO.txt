@@ -3,7 +3,7 @@ Immediate TODOs
 
 vm:
 
-* wabt fixture: rename stuff
+* wabt fixture: is the go package structured properly? vscode is confused
 
 Longer-term plans
 -----------------

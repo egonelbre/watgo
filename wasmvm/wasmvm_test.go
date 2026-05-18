@@ -2038,6 +2038,132 @@ func TestV128Const(t *testing.T) {
 	}
 }
 
+// TestV128Splat checks scalar-to-vector SIMD splat instructions.
+func TestV128Splat(t *testing.T) {
+	rt := wasmvm.NewRuntime()
+	inst, err := rt.Instantiate(parseWAT(t, `
+		(module
+			(func (export "i8_splat") (result v128)
+				i32.const 0x12345678
+				i8x16.splat)
+			(func (export "i16_splat") (result v128)
+				i32.const 0x12345678
+				i16x8.splat)
+			(func (export "i32_splat") (result v128)
+				i32.const 0x12345678
+				i32x4.splat)
+			(func (export "i64_splat") (result v128)
+				i64.const 0x1234567801020304
+				i64x2.splat)
+			(func (export "f32_splat") (result v128)
+				f32.const 1.0
+				f32x4.splat)
+			(func (export "f64_splat") (result v128)
+				f64.const 1.0
+				f64x2.splat))
+	`), nil)
+	if err != nil {
+		t.Fatalf("Instantiate failed: %v", err)
+	}
+
+	checkV128Export(t, inst, "i8_splat", [16]byte{
+		0x78, 0x78, 0x78, 0x78, 0x78, 0x78, 0x78, 0x78,
+		0x78, 0x78, 0x78, 0x78, 0x78, 0x78, 0x78, 0x78,
+	})
+	checkV128Export(t, inst, "i16_splat", [16]byte{
+		0x78, 0x56, 0x78, 0x56, 0x78, 0x56, 0x78, 0x56,
+		0x78, 0x56, 0x78, 0x56, 0x78, 0x56, 0x78, 0x56,
+	})
+	checkV128Export(t, inst, "i32_splat", [16]byte{
+		0x78, 0x56, 0x34, 0x12, 0x78, 0x56, 0x34, 0x12,
+		0x78, 0x56, 0x34, 0x12, 0x78, 0x56, 0x34, 0x12,
+	})
+	checkV128Export(t, inst, "i64_splat", [16]byte{
+		0x04, 0x03, 0x02, 0x01, 0x78, 0x56, 0x34, 0x12,
+		0x04, 0x03, 0x02, 0x01, 0x78, 0x56, 0x34, 0x12,
+	})
+	checkV128Export(t, inst, "f32_splat", [16]byte{
+		0x00, 0x00, 0x80, 0x3f, 0x00, 0x00, 0x80, 0x3f,
+		0x00, 0x00, 0x80, 0x3f, 0x00, 0x00, 0x80, 0x3f,
+	})
+	checkV128Export(t, inst, "f64_splat", [16]byte{
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xf0, 0x3f,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xf0, 0x3f,
+	})
+}
+
+// TestV128MemoryOps checks v128 load/store and load-splat instructions.
+func TestV128MemoryOps(t *testing.T) {
+	rt := wasmvm.NewRuntime()
+	inst, err := rt.Instantiate(parseWAT(t, `
+		(module
+			(memory 1)
+			(data (i32.const 0) "\ff\ff\ff\ff")
+			(data (i32.const 4) "\00\00\ce\41")
+			(data (i32.const 8) "\00\00\00\00\00\ff\8f\40")
+			(data (i32.const 16) "\ff\ff\ff\ff\ff\ff\ff\ff")
+			(func (export "load") (result v128)
+				i32.const 4
+				v128.load)
+			(func (export "load8_splat") (result v128)
+				i32.const 6
+				v128.load8_splat)
+			(func (export "load16_splat") (result v128)
+				i32.const 6
+				v128.load16_splat)
+			(func (export "load32_splat") (result v128)
+				i32.const 4
+				v128.load32_splat)
+			(func (export "load64_splat") (result v128)
+				i32.const 0
+				v128.load64_splat)
+			(func (export "store") (result v128)
+				i32.const 4
+				v128.const i32x4 0x11223344 0x55667788 0x99aabbcc 0xddeeff00
+				v128.store
+				i32.const 4
+				v128.load))
+	`), nil)
+	if err != nil {
+		t.Fatalf("Instantiate failed: %v", err)
+	}
+
+	checkV128Export(t, inst, "load", [16]byte{
+		0x00, 0x00, 0xce, 0x41, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0xff, 0x8f, 0x40, 0xff, 0xff, 0xff, 0xff,
+	})
+	checkV128Export(t, inst, "load8_splat", [16]byte{
+		0xce, 0xce, 0xce, 0xce, 0xce, 0xce, 0xce, 0xce,
+		0xce, 0xce, 0xce, 0xce, 0xce, 0xce, 0xce, 0xce,
+	})
+	checkV128Export(t, inst, "load16_splat", [16]byte{
+		0xce, 0x41, 0xce, 0x41, 0xce, 0x41, 0xce, 0x41,
+		0xce, 0x41, 0xce, 0x41, 0xce, 0x41, 0xce, 0x41,
+	})
+	checkV128Export(t, inst, "load32_splat", [16]byte{
+		0x00, 0x00, 0xce, 0x41, 0x00, 0x00, 0xce, 0x41,
+		0x00, 0x00, 0xce, 0x41, 0x00, 0x00, 0xce, 0x41,
+	})
+	checkV128Export(t, inst, "load64_splat", [16]byte{
+		0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0xce, 0x41,
+		0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0xce, 0x41,
+	})
+	checkV128Export(t, inst, "store", [16]byte{
+		0x44, 0x33, 0x22, 0x11, 0x88, 0x77, 0x66, 0x55,
+		0xcc, 0xbb, 0xaa, 0x99, 0x00, 0xff, 0xee, 0xdd,
+	})
+}
+
+// checkV128Export calls name and verifies that it returns the expected v128.
+func checkV128Export(t *testing.T, inst *wasmvm.ModuleInstance, name string, want [16]byte) {
+	t.Helper()
+
+	results := callExport(t, inst, name)
+	if len(results) != 1 || results[0].Type != wasmir.ValueTypeV128 || results[0].V128 != want {
+		t.Fatalf("%s got results %#v, want v128 %#v", name, results, want)
+	}
+}
+
 // TestMemory64ScalarOps checks that memory64 load/store instructions consume
 // i64 address operands and that active data offsets can also be i64.
 func TestMemory64ScalarOps(t *testing.T) {
