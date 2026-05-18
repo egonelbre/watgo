@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"encoding/binary"
 	"fmt"
 	"math"
 	"slices"
@@ -16,7 +17,6 @@ import (
 // does not support.
 var wabtWasmvmUnsupportedFixtures = []string{
 	// The SIMD fixture group requires v128 values and SIMD instructions.
-	"simd-basic.txt",
 	"simd-binary.txt",
 	"simd-bitselect.txt",
 	"simd-compare.txt",
@@ -369,6 +369,8 @@ func wabtWasmvmValueType(kind string) (wasmir.ValueType, error) {
 		return wasmir.ValueTypeF32, nil
 	case "f64":
 		return wasmir.ValueTypeF64, nil
+	case "v128":
+		return wasmir.ValueTypeV128, nil
 	case "funcref":
 		return wasmir.RefTypeFunc(true), nil
 	case "externref":
@@ -412,6 +414,8 @@ func wabtWasmvmResultValue(m *wasmir.Module, resultKind string, values []wasmvm.
 		return strconv.FormatUint(uint64(math.Float32bits(v.F32)), 10), nil
 	case "f64":
 		return strconv.FormatUint(math.Float64bits(v.F64), 10), nil
+	case "v128":
+		return wabtWasmvmV128Words(v.V128), nil
 	case "funcref":
 		if v.Ref.Kind == 0 {
 			return "0", nil
@@ -425,6 +429,16 @@ func wabtWasmvmResultValue(m *wasmir.Module, resultKind string, values []wasmvm.
 	default:
 		return "", fmt.Errorf("unsupported result kind %q", resultKind)
 	}
+}
+
+// wabtWasmvmV128Words formats a v128 value as four decimal little-endian i32
+// lane words for formatWABTResult.
+func wabtWasmvmV128Words(v [16]byte) string {
+	return fmt.Sprintf("%d,%d,%d,%d",
+		binary.LittleEndian.Uint32(v[0:4]),
+		binary.LittleEndian.Uint32(v[4:8]),
+		binary.LittleEndian.Uint32(v[8:12]),
+		binary.LittleEndian.Uint32(v[12:16]))
 }
 
 // wabtWasmvmFuncRefID maps wasmvm's function index to the numeric funcref ID

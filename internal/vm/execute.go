@@ -81,6 +81,9 @@ type Value struct {
 	// F64 is the payload for wasmir.ValueTypeF64 values.
 	F64 float64
 
+	// V128 is the payload for wasmir.ValueTypeV128 values.
+	V128 [16]byte
+
 	// Ref is the payload for reference-typed values.
 	Ref Reference
 }
@@ -723,6 +726,11 @@ func (e *executor) run() ([]Value, error) {
 			e.push(Value{Type: wasmir.ValueTypeI32, I32: v})
 		case wasmir.InstrF64Const:
 			e.push(Value{Type: wasmir.ValueTypeF64, F64: math.Float64frombits(uint64(ins.bits))})
+		case wasmir.InstrV128Const:
+			if int(ins.index) >= len(e.fn.v128Consts) {
+				return nil, e.instructionError(fmt.Errorf("v128.const index %d out of range", ins.index))
+			}
+			e.push(Value{Type: wasmir.ValueTypeV128, V128: e.fn.v128Consts[ins.index]})
 		case wasmir.InstrF64Abs, wasmir.InstrF64Neg, wasmir.InstrF64Sqrt,
 			wasmir.InstrF64Ceil, wasmir.InstrF64Floor, wasmir.InstrF64Trunc, wasmir.InstrF64Nearest:
 			v, err := e.evalF64Unary(ins.kind)
@@ -981,7 +989,7 @@ func (e *executor) run() ([]Value, error) {
 	return nil, fmt.Errorf("function ended without end")
 }
 
-// zeroValue constructs the default local value for a numeric value type.
+// zeroValue constructs the default local value for a supported value type.
 func zeroValue(vt wasmir.ValueType) (Value, error) {
 	switch vt {
 	case wasmir.ValueTypeI32:
@@ -992,6 +1000,8 @@ func zeroValue(vt wasmir.ValueType) (Value, error) {
 		return Value{Type: wasmir.ValueTypeF32}, nil
 	case wasmir.ValueTypeF64:
 		return Value{Type: wasmir.ValueTypeF64}, nil
+	case wasmir.ValueTypeV128:
+		return Value{Type: wasmir.ValueTypeV128}, nil
 	default:
 		if vt.IsRef() {
 			return Value{Type: vt, Ref: Reference{Kind: RefKindNull}}, nil

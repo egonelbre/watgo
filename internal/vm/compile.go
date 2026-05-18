@@ -42,6 +42,10 @@ type function struct {
 	// A typed select instruction stores its selectTypes index in instr.bits;
 	// untyped select stores -1 there.
 	selectTypes []wasmir.ValueType
+
+	// v128Consts stores SIMD constant immediates used by v128.const. The
+	// instruction stores its v128Consts index in instr.index.
+	v128Consts [][16]byte
 }
 
 // instr is one instruction in the VM's execution form.
@@ -59,7 +63,7 @@ type instr struct {
 	// index is the resolved index immediate for local.get/set/tee,
 	// global.get/set, call, call_ref, memory and table instructions,
 	// data.drop/elem.drop, br_table's branchTables entry, and ref.null's
-	// refTypes entry.
+	// refTypes entry. v128.const uses it as a v128Consts entry.
 	index uint32
 
 	// bits is the raw immediate payload for constant instructions.
@@ -204,6 +208,9 @@ func compileFunction(fn *wasmir.Function) (*function, error) {
 			op.bits = int64(ins.F32Const)
 		case wasmir.InstrF64Const:
 			op.bits = int64(ins.F64Const)
+		case wasmir.InstrV128Const:
+			op.index = uint32(len(out.v128Consts))
+			out.v128Consts = append(out.v128Consts, ins.V128Const)
 		case wasmir.InstrI32Add, wasmir.InstrI32Sub, wasmir.InstrI32Mul,
 			wasmir.InstrI32DivS, wasmir.InstrI32DivU, wasmir.InstrI32RemS, wasmir.InstrI32RemU,
 			wasmir.InstrI32And, wasmir.InstrI32Or, wasmir.InstrI32Xor,

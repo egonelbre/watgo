@@ -2014,6 +2014,30 @@ func TestScalarMemoryOps(t *testing.T) {
 	}
 }
 
+// TestV128Const checks that the VM can return a v128.const value.
+func TestV128Const(t *testing.T) {
+	rt := wasmvm.NewRuntime()
+	inst, err := rt.Instantiate(parseWAT(t, `
+		(module
+			(func (export "const") (result v128)
+				v128.const i32x4 0x11223344 0x55667788 0x99aabbcc 0xddeeff00))
+	`), nil)
+	if err != nil {
+		t.Fatalf("Instantiate failed: %v", err)
+	}
+
+	results := callExport(t, inst, "const")
+	want := [16]byte{
+		0x44, 0x33, 0x22, 0x11,
+		0x88, 0x77, 0x66, 0x55,
+		0xcc, 0xbb, 0xaa, 0x99,
+		0x00, 0xff, 0xee, 0xdd,
+	}
+	if len(results) != 1 || results[0].Type != wasmir.ValueTypeV128 || results[0].V128 != want {
+		t.Fatalf("const got results %#v, want v128 %#v", results, want)
+	}
+}
+
 // TestMemory64ScalarOps checks that memory64 load/store instructions consume
 // i64 address operands and that active data offsets can also be i64.
 func TestMemory64ScalarOps(t *testing.T) {
