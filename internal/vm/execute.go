@@ -286,11 +286,7 @@ func (e *executor) run() ([]Value, error) {
 			if e.inst == nil {
 				return nil, e.instructionError(fmt.Errorf("instance is nil"))
 			}
-			addr, err := e.popI32()
-			if err != nil {
-				return nil, e.instructionError(err)
-			}
-			effective, err := memoryAddress(addr, uint64(ins.bits))
+			effective, err := e.popMemoryAddress(ins.index, uint64(ins.bits))
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
@@ -308,11 +304,7 @@ func (e *executor) run() ([]Value, error) {
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
-			addr, err := e.popI32()
-			if err != nil {
-				return nil, e.instructionError(err)
-			}
-			effective, err := memoryAddress(addr, uint64(ins.bits))
+			effective, err := e.popMemoryAddress(ins.index, uint64(ins.bits))
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
@@ -325,11 +317,7 @@ func (e *executor) run() ([]Value, error) {
 			if e.inst == nil {
 				return nil, e.instructionError(fmt.Errorf("instance is nil"))
 			}
-			addr, err := e.popI32()
-			if err != nil {
-				return nil, e.instructionError(err)
-			}
-			effective, err := memoryAddress(addr, uint64(ins.bits))
+			effective, err := e.popMemoryAddress(ins.index, uint64(ins.bits))
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
@@ -347,11 +335,7 @@ func (e *executor) run() ([]Value, error) {
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
-			addr, err := e.popI32()
-			if err != nil {
-				return nil, e.instructionError(err)
-			}
-			effective, err := memoryAddress(addr, uint64(ins.bits))
+			effective, err := e.popMemoryAddress(ins.index, uint64(ins.bits))
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
@@ -362,11 +346,7 @@ func (e *executor) run() ([]Value, error) {
 			if e.inst == nil {
 				return nil, e.instructionError(fmt.Errorf("instance is nil"))
 			}
-			addr, err := e.popI32()
-			if err != nil {
-				return nil, e.instructionError(err)
-			}
-			effective, err := memoryAddress(addr, uint64(ins.bits))
+			effective, err := e.popMemoryAddress(ins.index, uint64(ins.bits))
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
@@ -383,11 +363,7 @@ func (e *executor) run() ([]Value, error) {
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
-			addr, err := e.popI32()
-			if err != nil {
-				return nil, e.instructionError(err)
-			}
-			effective, err := memoryAddress(addr, uint64(ins.bits))
+			effective, err := e.popMemoryAddress(ins.index, uint64(ins.bits))
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
@@ -398,11 +374,7 @@ func (e *executor) run() ([]Value, error) {
 			if e.inst == nil {
 				return nil, e.instructionError(fmt.Errorf("instance is nil"))
 			}
-			addr, err := e.popI32()
-			if err != nil {
-				return nil, e.instructionError(err)
-			}
-			effective, err := memoryAddress(addr, uint64(ins.bits))
+			effective, err := e.popMemoryAddress(ins.index, uint64(ins.bits))
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
@@ -419,11 +391,7 @@ func (e *executor) run() ([]Value, error) {
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
-			addr, err := e.popI32()
-			if err != nil {
-				return nil, e.instructionError(err)
-			}
-			effective, err := memoryAddress(addr, uint64(ins.bits))
+			effective, err := e.popMemoryAddress(ins.index, uint64(ins.bits))
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
@@ -438,24 +406,30 @@ func (e *executor) run() ([]Value, error) {
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
-			e.push(Value{Type: wasmir.ValueTypeI32, I32: int32(uint32(pages))})
+			if err := e.pushMemoryIndexResult(ins.index, pages); err != nil {
+				return nil, e.instructionError(err)
+			}
 		case wasmir.InstrMemoryGrow:
 			if e.inst == nil {
 				return nil, e.instructionError(fmt.Errorf("instance is nil"))
 			}
-			delta, err := e.popI32()
+			delta, err := e.popMemoryIndexOperand(ins.index)
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
-			oldPages, ok, err := e.inst.memoryGrow(ins.index, uint64(uint32(delta)))
+			oldPages, ok, err := e.inst.memoryGrow(ins.index, delta)
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
 			if !ok {
-				e.push(Value{Type: wasmir.ValueTypeI32, I32: -1})
+				if err := e.pushMemoryIndexResult(ins.index, ^uint64(0)); err != nil {
+					return nil, e.instructionError(err)
+				}
 				continue
 			}
-			e.push(Value{Type: wasmir.ValueTypeI32, I32: int32(uint32(oldPages))})
+			if err := e.pushMemoryIndexResult(ins.index, oldPages); err != nil {
+				return nil, e.instructionError(err)
+			}
 		case wasmir.InstrMemoryCopy:
 			if e.inst == nil {
 				return nil, e.instructionError(fmt.Errorf("instance is nil"))
@@ -1840,14 +1814,67 @@ func boolI32(v bool) int32 {
 	return 0
 }
 
-// memoryAddress computes an i32-memory effective address from the dynamic base
-// operand and the static memory offset immediate.
-func memoryAddress(base int32, offset uint64) (uint64, error) {
-	addr := uint64(uint32(base))
-	if addr > ^uint64(0)-offset {
+// popMemoryIndexOperand pops an operand whose type follows the indexed
+// memory's address type.
+func (e *executor) popMemoryIndexOperand(memoryIndex uint32) (uint64, error) {
+	addressType, err := e.inst.memoryAddressType(memoryIndex)
+	if err != nil {
+		return 0, err
+	}
+	switch addressType {
+	case wasmir.ValueTypeI32:
+		base, err := e.popI32()
+		if err != nil {
+			return 0, err
+		}
+		return uint64(uint32(base)), nil
+	case wasmir.ValueTypeI64:
+		base, err := e.popI64()
+		if err != nil {
+			return 0, err
+		}
+		return uint64(base), nil
+	default:
+		return 0, fmt.Errorf("memory %d has unsupported address type %s", memoryIndex, addressType)
+	}
+}
+
+// popMemoryAddress pops a dynamic address operand and applies the static
+// memory offset immediate.
+func (e *executor) popMemoryAddress(memoryIndex uint32, offset uint64) (uint64, error) {
+	base, err := e.popMemoryIndexOperand(memoryIndex)
+	if err != nil {
+		return 0, err
+	}
+	return memoryAddress(base, offset)
+}
+
+// pushMemoryIndexResult pushes a memory.size or memory.grow result in the
+// indexed memory's address type.
+func (e *executor) pushMemoryIndexResult(memoryIndex uint32, value uint64) error {
+	addressType, err := e.inst.memoryAddressType(memoryIndex)
+	if err != nil {
+		return err
+	}
+	switch addressType {
+	case wasmir.ValueTypeI32:
+		e.push(Value{Type: wasmir.ValueTypeI32, I32: int32(uint32(value))})
+		return nil
+	case wasmir.ValueTypeI64:
+		e.push(Value{Type: wasmir.ValueTypeI64, I64: int64(value)})
+		return nil
+	default:
+		return fmt.Errorf("memory %d has unsupported address type %s", memoryIndex, addressType)
+	}
+}
+
+// memoryAddress computes an effective address from the dynamic base operand
+// and the static memory offset immediate.
+func memoryAddress(base uint64, offset uint64) (uint64, error) {
+	if base > ^uint64(0)-offset {
 		return 0, fmt.Errorf("memory address overflow")
 	}
-	return addr + offset, nil
+	return base + offset, nil
 }
 
 // memoryAccessSize returns the byte width used by a supported memory

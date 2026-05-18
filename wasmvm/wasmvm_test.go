@@ -1956,6 +1956,80 @@ func TestScalarMemoryOps(t *testing.T) {
 	}
 }
 
+// TestMemory64ScalarOps checks that memory64 load/store instructions consume
+// i64 address operands and that active data offsets can also be i64.
+func TestMemory64ScalarOps(t *testing.T) {
+	rt := wasmvm.NewRuntime()
+	inst, err := rt.Instantiate(parseWAT(t, `
+		(module
+			(memory i64 1)
+			(data (i64.const 0) "\01\02\03\04\05\06\07\08")
+			(func (export "load_i32") (result i32)
+				i64.const 0
+				i32.load)
+			(func (export "load_i64") (result i64)
+				i64.const 0
+				i64.load)
+			(func (export "roundtrip_f64") (param f64) (result f64)
+				i64.const 16
+				local.get 0
+				f64.store
+				i64.const 16
+				f64.load))
+	`), nil)
+	if err != nil {
+		t.Fatalf("Instantiate failed: %v", err)
+	}
+
+	results := callExport(t, inst, "load_i32")
+	if len(results) != 1 || results[0] != wasmvm.I32(0x04030201) {
+		t.Fatalf("load_i32 got results %#v, want i32 0x04030201", results)
+	}
+
+	results = callExport(t, inst, "load_i64")
+	if len(results) != 1 || results[0] != wasmvm.I64(0x0807060504030201) {
+		t.Fatalf("load_i64 got results %#v, want i64 0x0807060504030201", results)
+	}
+
+	results = callExport(t, inst, "roundtrip_f64", wasmvm.F64(-9.25))
+	if len(results) != 1 || results[0] != wasmvm.F64(-9.25) {
+		t.Fatalf("roundtrip_f64 got results %#v, want f64 -9.25", results)
+	}
+}
+
+// TestMemory64SizeAndGrow checks that memory.size and memory.grow use i64
+// operands and results for memory64 memories.
+func TestMemory64SizeAndGrow(t *testing.T) {
+	rt := wasmvm.NewRuntime()
+	inst, err := rt.Instantiate(parseWAT(t, `
+		(module
+			(memory i64 1 2)
+			(func (export "size") (result i64)
+				memory.size)
+			(func (export "grow") (param i64) (result i64)
+				local.get 0
+				memory.grow))
+	`), nil)
+	if err != nil {
+		t.Fatalf("Instantiate failed: %v", err)
+	}
+
+	results := callExport(t, inst, "size")
+	if len(results) != 1 || results[0] != wasmvm.I64(1) {
+		t.Fatalf("size got results %#v, want i64 1", results)
+	}
+
+	results = callExport(t, inst, "grow", wasmvm.I64(1))
+	if len(results) != 1 || results[0] != wasmvm.I64(1) {
+		t.Fatalf("grow got results %#v, want old size i64 1", results)
+	}
+
+	results = callExport(t, inst, "grow", wasmvm.I64(1))
+	if len(results) != 1 || results[0] != wasmvm.I64(-1) {
+		t.Fatalf("failed grow got results %#v, want i64 -1", results)
+	}
+}
+
 func TestI64NarrowMemoryOps(t *testing.T) {
 	// Narrow i64 loads extend to i64, and narrow i64 stores truncate the
 	// low-order bytes of the stored value.
@@ -2343,6 +2417,33 @@ func TestExecutionErrorMemoryOutOfBoundsContext(t *testing.T) {
 		t.Fatal("Call succeeded unexpectedly")
 	}
 	if got, want := err.Error(), "pc 2 i32.store: memory access out of bounds"; got != want {
+		t.Fatalf("error = %q, want %q", got, want)
+	}
+}
+
+// TestExecutionErrorMemory64OutOfBoundsContext checks that out-of-bounds
+// memory64 operations still report the failing instruction location.
+func TestExecutionErrorMemory64OutOfBoundsContext(t *testing.T) {
+	rt := wasmvm.NewRuntime()
+	inst, err := rt.Instantiate(parseWAT(t, `
+		(module
+			(memory i64 1)
+			(func (export "load_oob") (result i32)
+				i64.const 65533
+				i32.load))
+	`), nil)
+	if err != nil {
+		t.Fatalf("Instantiate failed: %v", err)
+	}
+	run, ok := inst.ExportedFunc("load_oob")
+	if !ok {
+		t.Fatal("missing load_oob export")
+	}
+	_, err = run.Call()
+	if err == nil {
+		t.Fatal("Call succeeded unexpectedly")
+	}
+	if got, want := err.Error(), "pc 1 i32.load: memory access out of bounds"; got != want {
 		t.Fatalf("error = %q, want %q", got, want)
 	}
 }

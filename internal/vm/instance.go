@@ -53,8 +53,8 @@ type globalInst struct {
 // memoryInst is one instantiated linear memory in the module's memory index
 // space.
 type memoryInst struct {
-	// addressType is the validated address type for this memory. The VM
-	// currently supports only i32-addressed memories.
+	// addressType is the validated address type for this memory. It controls
+	// whether memory instructions consume i32 or i64 address operands.
 	addressType wasmir.ValueType
 
 	// max is the optional declared maximum size in WebAssembly pages.
@@ -249,7 +249,7 @@ func (inst *Instance) buildMemories() error {
 		if m.ImportModule != "" || m.ImportName != "" {
 			return fmt.Errorf("unsupported memory import %q.%q", m.ImportModule, m.ImportName)
 		}
-		if m.AddressType != wasmir.ValueTypeI32 {
+		if m.AddressType != wasmir.ValueTypeI32 && m.AddressType != wasmir.ValueTypeI64 {
 			return fmt.Errorf("memory[%d]: unsupported address type %s", i, m.AddressType)
 		}
 		if m.Min > uint64(int(^uint(0)>>1))/wasmPageSize {
@@ -358,21 +358,31 @@ func (inst *Instance) applyDataSegments() error {
 	return nil
 }
 
-// dataSegmentOffset evaluates the active data segment offset as an i32 memory
-// address.
+// dataSegmentOffset evaluates the active data segment offset in the target
+// memory's address type.
 func (inst *Instance) dataSegmentOffset(seg wasmir.DataSegment) (uint64, error) {
+	mem, err := inst.memoryInst(seg.MemoryIndex)
+	if err != nil {
+		return 0, err
+	}
 	if len(seg.OffsetExpr) > 0 {
 		v, err := inst.evalConstExpr(seg.OffsetExpr, true)
 		if err != nil {
 			return 0, err
 		}
-		if v.Type != wasmir.ValueTypeI32 {
-			return 0, fmt.Errorf("offset expression has type %s, want i32", v.Type)
+		if v.Type != mem.addressType {
+			return 0, fmt.Errorf("offset expression has type %s, want %s", v.Type, mem.addressType)
+		}
+		if v.Type == wasmir.ValueTypeI64 {
+			return uint64(v.I64), nil
 		}
 		return uint64(uint32(v.I32)), nil
 	}
-	if seg.OffsetType != wasmir.ValueTypeI32 {
-		return 0, fmt.Errorf("offset has type %s, want i32", seg.OffsetType)
+	if seg.OffsetType != mem.addressType {
+		return 0, fmt.Errorf("offset has type %s, want %s", seg.OffsetType, mem.addressType)
+	}
+	if seg.OffsetType == wasmir.ValueTypeI64 {
+		return uint64(seg.OffsetI64), nil
 	}
 	return uint64(uint32(int32(seg.OffsetI64))), nil
 }
@@ -882,6 +892,15 @@ func (inst *Instance) memoryInst(index uint32) (*memoryInst, error) {
 		return nil, fmt.Errorf("memory index %d out of range", index)
 	}
 	return &inst.memories[index], nil
+}
+
+// memoryAddressType returns the address operand type of the indexed memory.
+func (inst *Instance) memoryAddressType(index uint32) (wasmir.ValueType, error) {
+	mem, err := inst.memoryInst(index)
+	if err != nil {
+		return wasmir.ValueType{}, err
+	}
+	return mem.addressType, nil
 }
 
 // tableInst resolves a table index to the mutable instantiated table state.
