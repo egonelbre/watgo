@@ -286,6 +286,11 @@ func compileFunction(fn *wasmir.Function) (*function, error) {
 			wasmir.InstrRefEq, wasmir.InstrExternConvertAny, wasmir.InstrAnyConvertExtern,
 			wasmir.InstrI8x16Splat, wasmir.InstrI16x8Splat, wasmir.InstrI32x4Splat,
 			wasmir.InstrI64x2Splat, wasmir.InstrF32x4Splat, wasmir.InstrF64x2Splat,
+			wasmir.InstrI8x16Shl, wasmir.InstrI8x16ShrS, wasmir.InstrI8x16ShrU,
+			wasmir.InstrI16x8Shl, wasmir.InstrI16x8ShrS, wasmir.InstrI16x8ShrU,
+			wasmir.InstrI32x4Shl, wasmir.InstrI32x4ShrS, wasmir.InstrI32x4ShrU,
+			wasmir.InstrI64x2Shl, wasmir.InstrI64x2ShrS, wasmir.InstrI64x2ShrU,
+			wasmir.InstrV128Bitselect,
 			wasmir.InstrReturn:
 		case wasmir.InstrEnd:
 			if len(labelStack) == 0 {

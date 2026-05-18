@@ -2255,6 +2255,84 @@ func TestV128LaneOps(t *testing.T) {
 	checkV128Export(t, inst, "shuffle", v128I32x4(0xff55ff55, 0xff55ff55, 0xff55ff55, 0xff55ff55))
 }
 
+// TestV128ShiftAndBitselect checks integer SIMD shifts and v128.bitselect.
+func TestV128ShiftAndBitselect(t *testing.T) {
+	rt := wasmvm.NewRuntime()
+	inst, err := rt.Instantiate(parseWAT(t, `
+		(module
+			(func (export "i8_shl") (result v128)
+				v128.const i32x4 0xff000001 0xe0000002 0x00000003 0x00000004
+				i32.const 11
+				i8x16.shl)
+			(func (export "i8_shr_s") (result v128)
+				v128.const i32x4 0xff00000f 0xe00f7002 0x0f000003 0x000ff004
+				i32.const 11
+				i8x16.shr_s)
+			(func (export "i8_shr_u") (result v128)
+				v128.const i32x4 0xff00000f 0xe00f7002 0x0f000003 0x000ff004
+				i32.const 11
+				i8x16.shr_u)
+			(func (export "i16_shl") (result v128)
+				v128.const i32x4 0xff000071 0xe0000702 0x00000003 0x00000004
+				i32.const 19
+				i16x8.shl)
+			(func (export "i16_shr_s") (result v128)
+				v128.const i32x4 0xff00000f 0xe00f7002 0x0f000003 0x000ff004
+				i32.const 19
+				i16x8.shr_s)
+			(func (export "i16_shr_u") (result v128)
+				v128.const i32x4 0xff00000f 0xe00f7002 0x0f000003 0x000ff004
+				i32.const 19
+				i16x8.shr_u)
+			(func (export "i32_shl") (result v128)
+				v128.const i32x4 0xff0ff071 0xe0077702 0xe0004003 0x00002004
+				i32.const 35
+				i32x4.shl)
+			(func (export "i32_shr_s") (result v128)
+				v128.const i32x4 0xff00000f 0xe00f7002 0x0f000003 0x000ff004
+				i32.const 35
+				i32x4.shr_s)
+			(func (export "i32_shr_u") (result v128)
+				v128.const i32x4 0xff00000f 0xe00f7002 0x0f000003 0x000ff004
+				i32.const 35
+				i32x4.shr_u)
+			(func (export "i64_shl") (result v128)
+				v128.const i32x4 0xff000055 0xe0000702 0xe0004003 0x00002004
+				i32.const 67
+				i64x2.shl)
+			(func (export "i64_shr_s") (result v128)
+				v128.const i32x4 0xff00000f 0xe00f7002 0x0f000003 0x000ff004
+				i32.const 67
+				i64x2.shr_s)
+			(func (export "i64_shr_u") (result v128)
+				v128.const i32x4 0xff00000f 0xe00f7002 0x0f000003 0x000ff004
+				i32.const 67
+				i64x2.shr_u)
+			(func (export "bitselect") (result v128)
+				v128.const i32x4 0x00ff0001 0x00040002 0x55555555 0x00000004
+				v128.const i32x4 0x00020001 0x00fe0002 0xaaaaaaaa 0x55000004
+				v128.const i32x4 0xffffffff 0x00000000 0x55555555 0x55000004
+				v128.bitselect))
+	`), nil)
+	if err != nil {
+		t.Fatalf("Instantiate failed: %v", err)
+	}
+
+	checkV128Export(t, inst, "i8_shl", v128I32x4(0xf8000008, 0x00000010, 0x00000018, 0x00000020))
+	checkV128Export(t, inst, "i8_shr_s", v128I32x4(0xff000001, 0xfc010e00, 0x01000000, 0x0001fe00))
+	checkV128Export(t, inst, "i8_shr_u", v128I32x4(0x1f000001, 0x1c010e00, 0x01000000, 0x00011e00))
+	checkV128Export(t, inst, "i16_shl", v128I32x4(0xf8000388, 0x00003810, 0x00000018, 0x00000020))
+	checkV128Export(t, inst, "i16_shr_s", v128I32x4(0xffe00001, 0xfc010e00, 0x01e00000, 0x0001fe00))
+	checkV128Export(t, inst, "i16_shr_u", v128I32x4(0x1fe00001, 0x1c010e00, 0x01e00000, 0x00011e00))
+	checkV128Export(t, inst, "i32_shl", v128I32x4(0xf87f8388, 0x003bb810, 0x00020018, 0x00010020))
+	checkV128Export(t, inst, "i32_shr_s", v128I32x4(0xffe00001, 0xfc01ee00, 0x01e00000, 0x0001fe00))
+	checkV128Export(t, inst, "i32_shr_u", v128I32x4(0x1fe00001, 0x1c01ee00, 0x01e00000, 0x0001fe00))
+	checkV128Export(t, inst, "i64_shl", v128I32x4(0xf80002a8, 0x00003817, 0x00020018, 0x00010027))
+	checkV128Export(t, inst, "i64_shr_s", v128I32x4(0x5fe00001, 0xfc01ee00, 0x81e00000, 0x0001fe00))
+	checkV128Export(t, inst, "i64_shr_u", v128I32x4(0x5fe00001, 0x1c01ee00, 0x81e00000, 0x0001fe00))
+	checkV128Export(t, inst, "bitselect", v128I32x4(0x00ff0001, 0x00fe0002, 0xffffffff, 0x00000004))
+}
+
 // v128I32x4 builds the byte representation of a v128 value from i32 lanes.
 func v128I32x4(l0, l1, l2, l3 uint32) [16]byte {
 	return [16]byte{

@@ -18,9 +18,7 @@ import (
 var wabtWasmvmUnsupportedFixtures = []string{
 	// The SIMD fixture group requires v128 values and SIMD instructions.
 	"simd-binary.txt",
-	"simd-bitselect.txt",
 	"simd-compare.txt",
-	"simd-shift.txt",
 	"simd-unary.txt",
 }
 

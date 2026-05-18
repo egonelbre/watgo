@@ -808,6 +808,21 @@ func (e *executor) run() ([]Value, error) {
 				return nil, e.instructionError(err)
 			}
 			e.push(Value{Type: wasmir.ValueTypeV128, V128: value})
+		case wasmir.InstrI8x16Shl, wasmir.InstrI8x16ShrS, wasmir.InstrI8x16ShrU,
+			wasmir.InstrI16x8Shl, wasmir.InstrI16x8ShrS, wasmir.InstrI16x8ShrU,
+			wasmir.InstrI32x4Shl, wasmir.InstrI32x4ShrS, wasmir.InstrI32x4ShrU,
+			wasmir.InstrI64x2Shl, wasmir.InstrI64x2ShrS, wasmir.InstrI64x2ShrU:
+			value, err := e.evalV128Shift(ins.kind)
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			e.push(Value{Type: wasmir.ValueTypeV128, V128: value})
+		case wasmir.InstrV128Bitselect:
+			value, err := e.evalV128Bitselect()
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			e.push(Value{Type: wasmir.ValueTypeV128, V128: value})
 		case wasmir.InstrF64Abs, wasmir.InstrF64Neg, wasmir.InstrF64Sqrt,
 			wasmir.InstrF64Ceil, wasmir.InstrF64Floor, wasmir.InstrF64Trunc, wasmir.InstrF64Nearest:
 			v, err := e.evalF64Unary(ins.kind)
@@ -2150,6 +2165,120 @@ func (e *executor) evalI8x16Shuffle(shuffleIndex uint32) ([16]byte, error) {
 		}
 	}
 	return out, nil
+}
+
+// evalV128Shift evaluates one integer SIMD lane shift instruction.
+func (e *executor) evalV128Shift(kind wasmir.InstrKind) ([16]byte, error) {
+	count, err := e.popI32()
+	if err != nil {
+		return [16]byte{}, err
+	}
+	vec, err := e.popV128()
+	if err != nil {
+		return [16]byte{}, err
+	}
+
+	switch kind {
+	case wasmir.InstrI8x16Shl, wasmir.InstrI8x16ShrS, wasmir.InstrI8x16ShrU:
+		return shiftI8x16(kind, vec, uint32(count)&7), nil
+	case wasmir.InstrI16x8Shl, wasmir.InstrI16x8ShrS, wasmir.InstrI16x8ShrU:
+		return shiftI16x8(kind, vec, uint32(count)&15), nil
+	case wasmir.InstrI32x4Shl, wasmir.InstrI32x4ShrS, wasmir.InstrI32x4ShrU:
+		return shiftI32x4(kind, vec, uint32(count)&31), nil
+	case wasmir.InstrI64x2Shl, wasmir.InstrI64x2ShrS, wasmir.InstrI64x2ShrU:
+		return shiftI64x2(kind, vec, uint32(count)&63), nil
+	default:
+		return [16]byte{}, fmt.Errorf("unsupported SIMD shift instruction %s", instrName(kind))
+	}
+}
+
+// evalV128Bitselect evaluates v128.bitselect.
+func (e *executor) evalV128Bitselect() ([16]byte, error) {
+	mask, err := e.popV128()
+	if err != nil {
+		return [16]byte{}, err
+	}
+	b, err := e.popV128()
+	if err != nil {
+		return [16]byte{}, err
+	}
+	a, err := e.popV128()
+	if err != nil {
+		return [16]byte{}, err
+	}
+
+	var out [16]byte
+	for i := range out {
+		out[i] = (a[i] & mask[i]) | (b[i] &^ mask[i])
+	}
+	return out, nil
+}
+
+// shiftI8x16 applies an integer SIMD shift to each i8 lane.
+func shiftI8x16(kind wasmir.InstrKind, vec [16]byte, count uint32) [16]byte {
+	var out [16]byte
+	for i, raw := range vec {
+		switch kind {
+		case wasmir.InstrI8x16Shl:
+			out[i] = byte(uint8(raw) << count)
+		case wasmir.InstrI8x16ShrS:
+			out[i] = byte(int8(raw) >> count)
+		case wasmir.InstrI8x16ShrU:
+			out[i] = byte(uint8(raw) >> count)
+		}
+	}
+	return out
+}
+
+// shiftI16x8 applies an integer SIMD shift to each i16 lane.
+func shiftI16x8(kind wasmir.InstrKind, vec [16]byte, count uint32) [16]byte {
+	var out [16]byte
+	for i := 0; i < len(out); i += 2 {
+		raw := binary.LittleEndian.Uint16(vec[i : i+2])
+		switch kind {
+		case wasmir.InstrI16x8Shl:
+			binary.LittleEndian.PutUint16(out[i:i+2], raw<<count)
+		case wasmir.InstrI16x8ShrS:
+			binary.LittleEndian.PutUint16(out[i:i+2], uint16(int16(raw)>>count))
+		case wasmir.InstrI16x8ShrU:
+			binary.LittleEndian.PutUint16(out[i:i+2], raw>>count)
+		}
+	}
+	return out
+}
+
+// shiftI32x4 applies an integer SIMD shift to each i32 lane.
+func shiftI32x4(kind wasmir.InstrKind, vec [16]byte, count uint32) [16]byte {
+	var out [16]byte
+	for i := 0; i < len(out); i += 4 {
+		raw := binary.LittleEndian.Uint32(vec[i : i+4])
+		switch kind {
+		case wasmir.InstrI32x4Shl:
+			binary.LittleEndian.PutUint32(out[i:i+4], raw<<count)
+		case wasmir.InstrI32x4ShrS:
+			binary.LittleEndian.PutUint32(out[i:i+4], uint32(int32(raw)>>count))
+		case wasmir.InstrI32x4ShrU:
+			binary.LittleEndian.PutUint32(out[i:i+4], raw>>count)
+		}
+	}
+	return out
+}
+
+// shiftI64x2 applies an integer SIMD shift to each i64 lane.
+func shiftI64x2(kind wasmir.InstrKind, vec [16]byte, count uint32) [16]byte {
+	var out [16]byte
+	for i := 0; i < len(out); i += 8 {
+		raw := binary.LittleEndian.Uint64(vec[i : i+8])
+		switch kind {
+		case wasmir.InstrI64x2Shl:
+			binary.LittleEndian.PutUint64(out[i:i+8], raw<<count)
+		case wasmir.InstrI64x2ShrS:
+			binary.LittleEndian.PutUint64(out[i:i+8], uint64(int64(raw)>>count))
+		case wasmir.InstrI64x2ShrU:
+			binary.LittleEndian.PutUint64(out[i:i+8], raw>>count)
+		}
+	}
+	return out
 }
 
 // v128LaneByteOffset validates a SIMD lane index and returns its byte offset.
