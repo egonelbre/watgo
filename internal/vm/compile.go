@@ -46,6 +46,10 @@ type function struct {
 	// v128Consts stores SIMD constant immediates used by v128.const. The
 	// instruction stores its v128Consts index in instr.index.
 	v128Consts [][16]byte
+
+	// shuffleLanes stores SIMD shuffle immediates used by i8x16.shuffle. The
+	// instruction stores its shuffleLanes index in instr.index.
+	shuffleLanes [][16]byte
 }
 
 // instr is one instruction in the VM's execution form.
@@ -63,7 +67,8 @@ type instr struct {
 	// index is the resolved index immediate for local.get/set/tee,
 	// global.get/set, call, call_ref, memory and table instructions,
 	// data.drop/elem.drop, br_table's branchTables entry, and ref.null's
-	// refTypes entry. v128.const uses it as a v128Consts entry.
+	// refTypes entry. v128.const and i8x16.shuffle use it as a pool entry, and
+	// SIMD lane instructions use it as the lane immediate.
 	index uint32
 
 	// bits is the raw immediate payload for constant instructions.
@@ -214,6 +219,16 @@ func compileFunction(fn *wasmir.Function) (*function, error) {
 		case wasmir.InstrV128Const:
 			op.index = uint32(len(out.v128Consts))
 			out.v128Consts = append(out.v128Consts, ins.V128Const)
+		case wasmir.InstrI8x16Shuffle:
+			op.index = uint32(len(out.shuffleLanes))
+			out.shuffleLanes = append(out.shuffleLanes, ins.ShuffleLanes)
+		case wasmir.InstrI8x16ExtractLaneS, wasmir.InstrI8x16ExtractLaneU, wasmir.InstrI8x16ReplaceLane,
+			wasmir.InstrI16x8ExtractLaneS, wasmir.InstrI16x8ExtractLaneU, wasmir.InstrI16x8ReplaceLane,
+			wasmir.InstrI32x4ExtractLane, wasmir.InstrI32x4ReplaceLane,
+			wasmir.InstrI64x2ExtractLane, wasmir.InstrI64x2ReplaceLane,
+			wasmir.InstrF32x4ExtractLane, wasmir.InstrF32x4ReplaceLane,
+			wasmir.InstrF64x2ExtractLane, wasmir.InstrF64x2ReplaceLane:
+			op.index = ins.LaneIndex
 		case wasmir.InstrI32Add, wasmir.InstrI32Sub, wasmir.InstrI32Mul,
 			wasmir.InstrI32DivS, wasmir.InstrI32DivU, wasmir.InstrI32RemS, wasmir.InstrI32RemU,
 			wasmir.InstrI32And, wasmir.InstrI32Or, wasmir.InstrI32Xor,

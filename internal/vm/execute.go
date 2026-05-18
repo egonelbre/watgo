@@ -785,6 +785,29 @@ func (e *executor) run() ([]Value, error) {
 				return nil, e.instructionError(err)
 			}
 			e.push(Value{Type: wasmir.ValueTypeV128, V128: value})
+		case wasmir.InstrI8x16ExtractLaneS, wasmir.InstrI8x16ExtractLaneU,
+			wasmir.InstrI16x8ExtractLaneS, wasmir.InstrI16x8ExtractLaneU,
+			wasmir.InstrI32x4ExtractLane, wasmir.InstrI64x2ExtractLane,
+			wasmir.InstrF32x4ExtractLane, wasmir.InstrF64x2ExtractLane:
+			value, err := e.evalV128ExtractLane(ins.kind, ins.index)
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			e.push(value)
+		case wasmir.InstrI8x16ReplaceLane, wasmir.InstrI16x8ReplaceLane,
+			wasmir.InstrI32x4ReplaceLane, wasmir.InstrI64x2ReplaceLane,
+			wasmir.InstrF32x4ReplaceLane, wasmir.InstrF64x2ReplaceLane:
+			value, err := e.evalV128ReplaceLane(ins.kind, ins.index)
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			e.push(Value{Type: wasmir.ValueTypeV128, V128: value})
+		case wasmir.InstrI8x16Shuffle:
+			value, err := e.evalI8x16Shuffle(ins.index)
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			e.push(Value{Type: wasmir.ValueTypeV128, V128: value})
 		case wasmir.InstrF64Abs, wasmir.InstrF64Neg, wasmir.InstrF64Sqrt,
 			wasmir.InstrF64Ceil, wasmir.InstrF64Floor, wasmir.InstrF64Trunc, wasmir.InstrF64Nearest:
 			v, err := e.evalF64Unary(ins.kind)
@@ -1933,6 +1956,208 @@ func (e *executor) evalV128LoadSplat(kind wasmir.InstrKind, memoryIndex uint32, 
 		return [16]byte{}, err
 	}
 	return splatV128(width, raw), nil
+}
+
+// evalV128ExtractLane evaluates one SIMD lane extraction instruction.
+func (e *executor) evalV128ExtractLane(kind wasmir.InstrKind, lane uint32) (Value, error) {
+	vec, err := e.popV128()
+	if err != nil {
+		return Value{}, err
+	}
+
+	switch kind {
+	case wasmir.InstrI8x16ExtractLaneS:
+		offset, err := v128LaneByteOffset(kind, lane, 16, 1)
+		if err != nil {
+			return Value{}, err
+		}
+		return Value{Type: wasmir.ValueTypeI32, I32: int32(int8(vec[offset]))}, nil
+	case wasmir.InstrI8x16ExtractLaneU:
+		offset, err := v128LaneByteOffset(kind, lane, 16, 1)
+		if err != nil {
+			return Value{}, err
+		}
+		return Value{Type: wasmir.ValueTypeI32, I32: int32(vec[offset])}, nil
+	case wasmir.InstrI16x8ExtractLaneS:
+		offset, err := v128LaneByteOffset(kind, lane, 8, 2)
+		if err != nil {
+			return Value{}, err
+		}
+		raw := binary.LittleEndian.Uint16(vec[offset : offset+2])
+		return Value{Type: wasmir.ValueTypeI32, I32: int32(int16(raw))}, nil
+	case wasmir.InstrI16x8ExtractLaneU:
+		offset, err := v128LaneByteOffset(kind, lane, 8, 2)
+		if err != nil {
+			return Value{}, err
+		}
+		raw := binary.LittleEndian.Uint16(vec[offset : offset+2])
+		return Value{Type: wasmir.ValueTypeI32, I32: int32(raw)}, nil
+	case wasmir.InstrI32x4ExtractLane:
+		offset, err := v128LaneByteOffset(kind, lane, 4, 4)
+		if err != nil {
+			return Value{}, err
+		}
+		raw := binary.LittleEndian.Uint32(vec[offset : offset+4])
+		return Value{Type: wasmir.ValueTypeI32, I32: int32(raw)}, nil
+	case wasmir.InstrI64x2ExtractLane:
+		offset, err := v128LaneByteOffset(kind, lane, 2, 8)
+		if err != nil {
+			return Value{}, err
+		}
+		raw := binary.LittleEndian.Uint64(vec[offset : offset+8])
+		return Value{Type: wasmir.ValueTypeI64, I64: int64(raw)}, nil
+	case wasmir.InstrF32x4ExtractLane:
+		offset, err := v128LaneByteOffset(kind, lane, 4, 4)
+		if err != nil {
+			return Value{}, err
+		}
+		raw := binary.LittleEndian.Uint32(vec[offset : offset+4])
+		return Value{Type: wasmir.ValueTypeF32, F32: math.Float32frombits(raw)}, nil
+	case wasmir.InstrF64x2ExtractLane:
+		offset, err := v128LaneByteOffset(kind, lane, 2, 8)
+		if err != nil {
+			return Value{}, err
+		}
+		raw := binary.LittleEndian.Uint64(vec[offset : offset+8])
+		return Value{Type: wasmir.ValueTypeF64, F64: math.Float64frombits(raw)}, nil
+	default:
+		return Value{}, fmt.Errorf("unsupported extract_lane instruction %s", instrName(kind))
+	}
+}
+
+// evalV128ReplaceLane evaluates one SIMD lane replacement instruction.
+func (e *executor) evalV128ReplaceLane(kind wasmir.InstrKind, lane uint32) ([16]byte, error) {
+	switch kind {
+	case wasmir.InstrI8x16ReplaceLane:
+		scalar, err := e.popI32()
+		if err != nil {
+			return [16]byte{}, err
+		}
+		vec, err := e.popV128()
+		if err != nil {
+			return [16]byte{}, err
+		}
+		offset, err := v128LaneByteOffset(kind, lane, 16, 1)
+		if err != nil {
+			return [16]byte{}, err
+		}
+		vec[offset] = byte(scalar)
+		return vec, nil
+	case wasmir.InstrI16x8ReplaceLane:
+		scalar, err := e.popI32()
+		if err != nil {
+			return [16]byte{}, err
+		}
+		vec, err := e.popV128()
+		if err != nil {
+			return [16]byte{}, err
+		}
+		offset, err := v128LaneByteOffset(kind, lane, 8, 2)
+		if err != nil {
+			return [16]byte{}, err
+		}
+		binary.LittleEndian.PutUint16(vec[offset:offset+2], uint16(scalar))
+		return vec, nil
+	case wasmir.InstrI32x4ReplaceLane:
+		scalar, err := e.popI32()
+		if err != nil {
+			return [16]byte{}, err
+		}
+		vec, err := e.popV128()
+		if err != nil {
+			return [16]byte{}, err
+		}
+		offset, err := v128LaneByteOffset(kind, lane, 4, 4)
+		if err != nil {
+			return [16]byte{}, err
+		}
+		binary.LittleEndian.PutUint32(vec[offset:offset+4], uint32(scalar))
+		return vec, nil
+	case wasmir.InstrI64x2ReplaceLane:
+		scalar, err := e.popI64()
+		if err != nil {
+			return [16]byte{}, err
+		}
+		vec, err := e.popV128()
+		if err != nil {
+			return [16]byte{}, err
+		}
+		offset, err := v128LaneByteOffset(kind, lane, 2, 8)
+		if err != nil {
+			return [16]byte{}, err
+		}
+		binary.LittleEndian.PutUint64(vec[offset:offset+8], uint64(scalar))
+		return vec, nil
+	case wasmir.InstrF32x4ReplaceLane:
+		scalar, err := e.popF32()
+		if err != nil {
+			return [16]byte{}, err
+		}
+		vec, err := e.popV128()
+		if err != nil {
+			return [16]byte{}, err
+		}
+		offset, err := v128LaneByteOffset(kind, lane, 4, 4)
+		if err != nil {
+			return [16]byte{}, err
+		}
+		binary.LittleEndian.PutUint32(vec[offset:offset+4], math.Float32bits(scalar))
+		return vec, nil
+	case wasmir.InstrF64x2ReplaceLane:
+		scalar, err := e.popF64()
+		if err != nil {
+			return [16]byte{}, err
+		}
+		vec, err := e.popV128()
+		if err != nil {
+			return [16]byte{}, err
+		}
+		offset, err := v128LaneByteOffset(kind, lane, 2, 8)
+		if err != nil {
+			return [16]byte{}, err
+		}
+		binary.LittleEndian.PutUint64(vec[offset:offset+8], math.Float64bits(scalar))
+		return vec, nil
+	default:
+		return [16]byte{}, fmt.Errorf("unsupported replace_lane instruction %s", instrName(kind))
+	}
+}
+
+// evalI8x16Shuffle evaluates i8x16.shuffle using the compiled shuffle
+// immediate stored on the function.
+func (e *executor) evalI8x16Shuffle(shuffleIndex uint32) ([16]byte, error) {
+	if int(shuffleIndex) >= len(e.fn.shuffleLanes) {
+		return [16]byte{}, fmt.Errorf("shuffle index %d out of range", shuffleIndex)
+	}
+	laneIndex := e.fn.shuffleLanes[shuffleIndex]
+	rhs, err := e.popV128()
+	if err != nil {
+		return [16]byte{}, err
+	}
+	lhs, err := e.popV128()
+	if err != nil {
+		return [16]byte{}, err
+	}
+
+	var out [16]byte
+	for i, lane := range laneIndex {
+		if lane < 16 {
+			out[i] = lhs[lane]
+		} else if lane < 32 {
+			out[i] = rhs[lane-16]
+		} else {
+			return [16]byte{}, fmt.Errorf("shuffle lane %d out of range", lane)
+		}
+	}
+	return out, nil
+}
+
+// v128LaneByteOffset validates a SIMD lane index and returns its byte offset.
+func v128LaneByteOffset(kind wasmir.InstrKind, lane uint32, lanes uint32, width uint32) (uint32, error) {
+	if lane >= lanes {
+		return 0, fmt.Errorf("%s lane %d out of range for %d lanes", instrName(kind), lane, lanes)
+	}
+	return lane * width, nil
 }
 
 // v128LoadSplatWidth returns the byte width read by a SIMD load-splat

@@ -2164,6 +2164,107 @@ func checkV128Export(t *testing.T, inst *wasmvm.ModuleInstance, name string, wan
 	}
 }
 
+// TestV128LaneOps checks SIMD lane extract, replace, and shuffle instructions.
+func TestV128LaneOps(t *testing.T) {
+	rt := wasmvm.NewRuntime()
+	inst, err := rt.Instantiate(parseWAT(t, `
+		(module
+			(func (export "i8_extract_s") (result i32)
+				v128.const i32x4 0x00000001 0x0000000f 0x000000ff 0x0000017f
+				i8x16.extract_lane_s 8)
+			(func (export "i8_extract_u") (result i32)
+				v128.const i32x4 0x00000001 0x0000000f 0x000000ff 0x0000017f
+				i8x16.extract_lane_u 8)
+			(func (export "i16_extract_s") (result i32)
+				v128.const i32x4 0x00000001 0x0000000f 0x0000ffff 0x0000017f
+				i16x8.extract_lane_s 4)
+			(func (export "i16_extract_u") (result i32)
+				v128.const i32x4 0x00000001 0x0000000f 0x0000ffff 0x0000017f
+				i16x8.extract_lane_u 4)
+			(func (export "i32_extract") (result i32)
+				v128.const i32x4 0x00000001 0x0000000f 0x0000ffff 0x0000017f
+				i32x4.extract_lane 2)
+			(func (export "i64_extract") (result i64)
+				v128.const i32x4 0x0000000f 0x00000000 0x0000ffff 0x0000017f
+				i64x2.extract_lane 0)
+			(func (export "f32_extract") (result f32)
+				v128.const i32x4 0x00000001 0x3fc00000 0x0000ffff 0x0000017f
+				f32x4.extract_lane 1)
+			(func (export "f64_extract") (result f64)
+				v128.const i32x4 0x00000000 0x40120000 0x0000ffff 0x0000017f
+				f64x2.extract_lane 0)
+			(func (export "i8_replace") (result v128)
+				v128.const i32x4 0x00000001 0x0000000f 0x000000ff 0x0000017f
+				i32.const 0xe5
+				i8x16.replace_lane 8)
+			(func (export "i16_replace") (result v128)
+				v128.const i32x4 0x00000001 0x0000000f 0x0000ffff 0x0000017f
+				i32.const 0xe5e6
+				i16x8.replace_lane 4)
+			(func (export "i32_replace") (result v128)
+				v128.const i32x4 0x00000001 0x0000000f 0x0000ffff 0x0000017f
+				i32.const 0x12345678
+				i32x4.replace_lane 2)
+			(func (export "i64_replace") (result v128)
+				v128.const i32x4 0x0000000f 0x00000000 0x0000ffff 0x0000017f
+				i64.const 0x0000123400005678
+				i64x2.replace_lane 0)
+			(func (export "f32_replace") (result v128)
+				v128.const i32x4 0x00000001 0x00000000 0x0000ffff 0x0000017f
+				f32.const 1.5
+				f32x4.replace_lane 1)
+			(func (export "f64_replace") (result v128)
+				v128.const i32x4 0x0000789a 0xff880330 0x0000ffff 0x0000017f
+				f64.const 4.5
+				f64x2.replace_lane 0)
+			(func (export "shuffle") (result v128)
+				v128.const i32x4 0xff00ff01 0xff00ff0f 0xff00ffff 0xff00ff7f
+				v128.const i32x4 0x00550055 0x00550055 0x00550055 0x00550155
+				i8x16.shuffle 16 1 18 3 20 5 22 7 24 9 26 11 28 13 30 15))
+	`), nil)
+	if err != nil {
+		t.Fatalf("Instantiate failed: %v", err)
+	}
+
+	scalarChecks := []struct {
+		name string
+		want wasmvm.Value
+	}{
+		{"i8_extract_s", wasmvm.I32(-1)},
+		{"i8_extract_u", wasmvm.I32(255)},
+		{"i16_extract_s", wasmvm.I32(-1)},
+		{"i16_extract_u", wasmvm.I32(65535)},
+		{"i32_extract", wasmvm.I32(65535)},
+		{"i64_extract", wasmvm.I64(15)},
+		{"f32_extract", wasmvm.F32(1.5)},
+		{"f64_extract", wasmvm.F64(4.5)},
+	}
+	for _, check := range scalarChecks {
+		results := callExport(t, inst, check.name)
+		if len(results) != 1 || results[0] != check.want {
+			t.Fatalf("%s got results %#v, want %#v", check.name, results, check.want)
+		}
+	}
+
+	checkV128Export(t, inst, "i8_replace", v128I32x4(0x00000001, 0x0000000f, 0x000000e5, 0x0000017f))
+	checkV128Export(t, inst, "i16_replace", v128I32x4(0x00000001, 0x0000000f, 0x0000e5e6, 0x0000017f))
+	checkV128Export(t, inst, "i32_replace", v128I32x4(0x00000001, 0x0000000f, 0x12345678, 0x0000017f))
+	checkV128Export(t, inst, "i64_replace", v128I32x4(0x00005678, 0x00001234, 0x0000ffff, 0x0000017f))
+	checkV128Export(t, inst, "f32_replace", v128I32x4(0x00000001, math.Float32bits(1.5), 0x0000ffff, 0x0000017f))
+	checkV128Export(t, inst, "f64_replace", v128I32x4(0x00000000, 0x40120000, 0x0000ffff, 0x0000017f))
+	checkV128Export(t, inst, "shuffle", v128I32x4(0xff55ff55, 0xff55ff55, 0xff55ff55, 0xff55ff55))
+}
+
+// v128I32x4 builds the byte representation of a v128 value from i32 lanes.
+func v128I32x4(l0, l1, l2, l3 uint32) [16]byte {
+	return [16]byte{
+		byte(l0), byte(l0 >> 8), byte(l0 >> 16), byte(l0 >> 24),
+		byte(l1), byte(l1 >> 8), byte(l1 >> 16), byte(l1 >> 24),
+		byte(l2), byte(l2 >> 8), byte(l2 >> 16), byte(l2 >> 24),
+		byte(l3), byte(l3 >> 8), byte(l3 >> 16), byte(l3 >> 24),
+	}
+}
+
 // TestMemory64ScalarOps checks that memory64 load/store instructions consume
 // i64 address operands and that active data offsets can also be i64.
 func TestMemory64ScalarOps(t *testing.T) {
