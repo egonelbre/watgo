@@ -3,6 +3,7 @@ package tests
 import (
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -11,70 +12,52 @@ import (
 	"github.com/eliben/watgo/wasmvm"
 )
 
-// wabtWasmvmFixtures lists fixtures covered by the wasmvm backend while
-// its instruction support is still growing.
-var wabtWasmvmFixtures = []string{
-	"basic.txt",
-	"binary.txt",
-	"block-multi.txt",
-	"br.txt",
-	"brif-loop.txt",
-	"brif.txt",
-	"brtable.txt",
-	"call-dummy-import.txt",
-	"call-multi-result.txt",
-	"call-zero-args.txt",
-	"call.txt",
-	"callimport-zero-args.txt",
-	"callindirect.txt",
-	"cast.txt",
-	"compare.txt",
-	"convert-sat.txt",
-	"convert.txt",
-	"empty.txt",
-	"expr-block.txt",
-	"expr-br.txt",
-	"expr-brif.txt",
-	"expr-if.txt",
-	"if-multi.txt",
-	"if.txt",
-	"load.txt",
-	"load64.txt",
-	"loop-multi.txt",
-	"loop.txt",
-	"memory-empty-segment.txt",
-	"nested-if.txt",
-	"return-call-import.txt",
-	"return-call-indirect-import.txt",
-	"return-call-indirect.txt",
-	"return-call-local-set.txt",
-	"return-call.txt",
-	"return-void.txt",
-	"return.txt",
-	"run-export-as-global.txt",
-	"run-export-with-argument.txt",
-	"run-export-with-invalid-arguments-size.txt",
-	"run-non-func-export.txt",
-	"select-ref.txt",
-	"select.txt",
-	"start-failure.txt",
-	"start.txt",
-	"store.txt",
-	"store64.txt",
-	"trap-with-callstack.txt",
-	"unary-extend.txt",
-	"unary.txt",
-	"unreachable.txt",
+// wabtWasmvmUnsupportedFixtures lists WABT fixtures the wasmvm backend still
+// does not support.
+var wabtWasmvmUnsupportedFixtures = []string{
+	// import currently needs duplicate synthetic import handling in the WABT
+	// harness before it can exercise wasmvm.
+	"import.txt",
+
+	// reference-types currently differs in visible function-reference numbering.
+	"reference-types.txt",
+
+	// The SIMD fixture group requires v128 values and SIMD instructions.
+	"simd-basic.txt",
+	"simd-binary.txt",
+	"simd-bitselect.txt",
+	"simd-compare.txt",
+	"simd-lane.txt",
+	"simd-load-store.txt",
+	"simd-shift.txt",
+	"simd-splat.txt",
+	"simd-unary.txt",
 }
 
 // wabtWasmvmBackend returns the wasmvm-backed WABT interp execution
 // backend.
-func wabtWasmvmBackend() wabtBackend {
+func wabtWasmvmBackend(t *testing.T) wabtBackend {
 	return wabtBackend{
 		name:     "wasmvm",
-		fixtures: wabtWasmvmFixtures,
+		fixtures: wabtWasmvmFixtures(t),
 		run:      runWABTWasmvmFixture,
 	}
+}
+
+// wabtWasmvmFixtures returns all discovered WABT fixtures except the ones
+// currently denied for the wasmvm backend.
+func wabtWasmvmFixtures(t *testing.T) []string {
+	t.Helper()
+
+	files := discoverWABTFixtures(t)
+	out := make([]string, 0, len(files))
+	for _, file := range files {
+		if slices.Contains(wabtWasmvmUnsupportedFixtures, file) {
+			continue
+		}
+		out = append(out, file)
+	}
+	return out
 }
 
 // runWABTWasmvmFixture executes one compiled fixture through wasmvm.

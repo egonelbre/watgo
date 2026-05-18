@@ -145,9 +145,9 @@ func TestWABTNode(t *testing.T) {
 	runWABTBackend(t, wabtNodeBackend())
 }
 
-// TestWABTWasmvm runs the current WABT interp whitelist through wasmvm.
+// TestWABTWasmvm runs the WABT interp fixtures currently supported by wasmvm.
 func TestWABTWasmvm(t *testing.T) {
-	runWABTBackend(t, wabtWasmvmBackend())
+	runWABTBackend(t, wabtWasmvmBackend(t))
 }
 
 // TestWABTPrintRoundTrip checks WABT interp fixture print stability.
