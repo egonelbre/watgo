@@ -823,6 +823,26 @@ func (e *executor) run() ([]Value, error) {
 				return nil, e.instructionError(err)
 			}
 			e.push(Value{Type: wasmir.ValueTypeV128, V128: value})
+		case wasmir.InstrI8x16Eq, wasmir.InstrI8x16Ne, wasmir.InstrI8x16LtS, wasmir.InstrI8x16LtU,
+			wasmir.InstrI8x16GtS, wasmir.InstrI8x16GtU, wasmir.InstrI8x16LeS, wasmir.InstrI8x16LeU,
+			wasmir.InstrI8x16GeS, wasmir.InstrI8x16GeU,
+			wasmir.InstrI16x8Eq, wasmir.InstrI16x8Ne, wasmir.InstrI16x8LtS, wasmir.InstrI16x8LtU,
+			wasmir.InstrI16x8GtS, wasmir.InstrI16x8GtU, wasmir.InstrI16x8LeS, wasmir.InstrI16x8LeU,
+			wasmir.InstrI16x8GeS, wasmir.InstrI16x8GeU,
+			wasmir.InstrI32x4Eq, wasmir.InstrI32x4Ne, wasmir.InstrI32x4LtS, wasmir.InstrI32x4LtU,
+			wasmir.InstrI32x4GtS, wasmir.InstrI32x4GtU, wasmir.InstrI32x4LeS, wasmir.InstrI32x4LeU,
+			wasmir.InstrI32x4GeS, wasmir.InstrI32x4GeU,
+			wasmir.InstrI64x2Eq, wasmir.InstrI64x2Ne, wasmir.InstrI64x2LtS,
+			wasmir.InstrI64x2GtS, wasmir.InstrI64x2LeS, wasmir.InstrI64x2GeS,
+			wasmir.InstrF32x4Eq, wasmir.InstrF32x4Ne, wasmir.InstrF32x4Lt,
+			wasmir.InstrF32x4Gt, wasmir.InstrF32x4Le, wasmir.InstrF32x4Ge,
+			wasmir.InstrF64x2Eq, wasmir.InstrF64x2Ne, wasmir.InstrF64x2Lt,
+			wasmir.InstrF64x2Gt, wasmir.InstrF64x2Le, wasmir.InstrF64x2Ge:
+			value, err := e.evalV128Compare(ins.kind)
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			e.push(Value{Type: wasmir.ValueTypeV128, V128: value})
 		case wasmir.InstrF64Abs, wasmir.InstrF64Neg, wasmir.InstrF64Sqrt,
 			wasmir.InstrF64Ceil, wasmir.InstrF64Floor, wasmir.InstrF64Trunc, wasmir.InstrF64Nearest:
 			v, err := e.evalF64Unary(ins.kind)
@@ -2214,6 +2234,44 @@ func (e *executor) evalV128Bitselect() ([16]byte, error) {
 	return out, nil
 }
 
+// evalV128Compare evaluates one SIMD comparison instruction.
+func (e *executor) evalV128Compare(kind wasmir.InstrKind) ([16]byte, error) {
+	rhs, err := e.popV128()
+	if err != nil {
+		return [16]byte{}, err
+	}
+	lhs, err := e.popV128()
+	if err != nil {
+		return [16]byte{}, err
+	}
+
+	switch kind {
+	case wasmir.InstrI8x16Eq, wasmir.InstrI8x16Ne, wasmir.InstrI8x16LtS, wasmir.InstrI8x16LtU,
+		wasmir.InstrI8x16GtS, wasmir.InstrI8x16GtU, wasmir.InstrI8x16LeS, wasmir.InstrI8x16LeU,
+		wasmir.InstrI8x16GeS, wasmir.InstrI8x16GeU:
+		return compareI8x16(kind, lhs, rhs), nil
+	case wasmir.InstrI16x8Eq, wasmir.InstrI16x8Ne, wasmir.InstrI16x8LtS, wasmir.InstrI16x8LtU,
+		wasmir.InstrI16x8GtS, wasmir.InstrI16x8GtU, wasmir.InstrI16x8LeS, wasmir.InstrI16x8LeU,
+		wasmir.InstrI16x8GeS, wasmir.InstrI16x8GeU:
+		return compareI16x8(kind, lhs, rhs), nil
+	case wasmir.InstrI32x4Eq, wasmir.InstrI32x4Ne, wasmir.InstrI32x4LtS, wasmir.InstrI32x4LtU,
+		wasmir.InstrI32x4GtS, wasmir.InstrI32x4GtU, wasmir.InstrI32x4LeS, wasmir.InstrI32x4LeU,
+		wasmir.InstrI32x4GeS, wasmir.InstrI32x4GeU:
+		return compareI32x4(kind, lhs, rhs), nil
+	case wasmir.InstrI64x2Eq, wasmir.InstrI64x2Ne, wasmir.InstrI64x2LtS,
+		wasmir.InstrI64x2GtS, wasmir.InstrI64x2LeS, wasmir.InstrI64x2GeS:
+		return compareI64x2(kind, lhs, rhs), nil
+	case wasmir.InstrF32x4Eq, wasmir.InstrF32x4Ne, wasmir.InstrF32x4Lt,
+		wasmir.InstrF32x4Gt, wasmir.InstrF32x4Le, wasmir.InstrF32x4Ge:
+		return compareF32x4(kind, lhs, rhs), nil
+	case wasmir.InstrF64x2Eq, wasmir.InstrF64x2Ne, wasmir.InstrF64x2Lt,
+		wasmir.InstrF64x2Gt, wasmir.InstrF64x2Le, wasmir.InstrF64x2Ge:
+		return compareF64x2(kind, lhs, rhs), nil
+	default:
+		return [16]byte{}, fmt.Errorf("unsupported SIMD compare instruction %s", instrName(kind))
+	}
+}
+
 // shiftI8x16 applies an integer SIMD shift to each i8 lane.
 func shiftI8x16(kind wasmir.InstrKind, vec [16]byte, count uint32) [16]byte {
 	var out [16]byte
@@ -2279,6 +2337,218 @@ func shiftI64x2(kind wasmir.InstrKind, vec [16]byte, count uint32) [16]byte {
 		}
 	}
 	return out
+}
+
+// compareI8x16 compares each i8 lane and writes an i8 lane mask result.
+func compareI8x16(kind wasmir.InstrKind, lhs [16]byte, rhs [16]byte) [16]byte {
+	var out [16]byte
+	for i := range out {
+		a := lhs[i]
+		b := rhs[i]
+		var ok bool
+		switch kind {
+		case wasmir.InstrI8x16Eq:
+			ok = a == b
+		case wasmir.InstrI8x16Ne:
+			ok = a != b
+		case wasmir.InstrI8x16LtS:
+			ok = int8(a) < int8(b)
+		case wasmir.InstrI8x16LtU:
+			ok = a < b
+		case wasmir.InstrI8x16GtS:
+			ok = int8(a) > int8(b)
+		case wasmir.InstrI8x16GtU:
+			ok = a > b
+		case wasmir.InstrI8x16LeS:
+			ok = int8(a) <= int8(b)
+		case wasmir.InstrI8x16LeU:
+			ok = a <= b
+		case wasmir.InstrI8x16GeS:
+			ok = int8(a) >= int8(b)
+		case wasmir.InstrI8x16GeU:
+			ok = a >= b
+		}
+		out[i] = boolMask8(ok)
+	}
+	return out
+}
+
+// compareI16x8 compares each i16 lane and writes an i16 lane mask result.
+func compareI16x8(kind wasmir.InstrKind, lhs [16]byte, rhs [16]byte) [16]byte {
+	var out [16]byte
+	for i := 0; i < len(out); i += 2 {
+		a := binary.LittleEndian.Uint16(lhs[i : i+2])
+		b := binary.LittleEndian.Uint16(rhs[i : i+2])
+		var ok bool
+		switch kind {
+		case wasmir.InstrI16x8Eq:
+			ok = a == b
+		case wasmir.InstrI16x8Ne:
+			ok = a != b
+		case wasmir.InstrI16x8LtS:
+			ok = int16(a) < int16(b)
+		case wasmir.InstrI16x8LtU:
+			ok = a < b
+		case wasmir.InstrI16x8GtS:
+			ok = int16(a) > int16(b)
+		case wasmir.InstrI16x8GtU:
+			ok = a > b
+		case wasmir.InstrI16x8LeS:
+			ok = int16(a) <= int16(b)
+		case wasmir.InstrI16x8LeU:
+			ok = a <= b
+		case wasmir.InstrI16x8GeS:
+			ok = int16(a) >= int16(b)
+		case wasmir.InstrI16x8GeU:
+			ok = a >= b
+		}
+		binary.LittleEndian.PutUint16(out[i:i+2], boolMask16(ok))
+	}
+	return out
+}
+
+// compareI32x4 compares each i32 lane and writes an i32 lane mask result.
+func compareI32x4(kind wasmir.InstrKind, lhs [16]byte, rhs [16]byte) [16]byte {
+	var out [16]byte
+	for i := 0; i < len(out); i += 4 {
+		a := binary.LittleEndian.Uint32(lhs[i : i+4])
+		b := binary.LittleEndian.Uint32(rhs[i : i+4])
+		var ok bool
+		switch kind {
+		case wasmir.InstrI32x4Eq:
+			ok = a == b
+		case wasmir.InstrI32x4Ne:
+			ok = a != b
+		case wasmir.InstrI32x4LtS:
+			ok = int32(a) < int32(b)
+		case wasmir.InstrI32x4LtU:
+			ok = a < b
+		case wasmir.InstrI32x4GtS:
+			ok = int32(a) > int32(b)
+		case wasmir.InstrI32x4GtU:
+			ok = a > b
+		case wasmir.InstrI32x4LeS:
+			ok = int32(a) <= int32(b)
+		case wasmir.InstrI32x4LeU:
+			ok = a <= b
+		case wasmir.InstrI32x4GeS:
+			ok = int32(a) >= int32(b)
+		case wasmir.InstrI32x4GeU:
+			ok = a >= b
+		}
+		binary.LittleEndian.PutUint32(out[i:i+4], boolMask32(ok))
+	}
+	return out
+}
+
+// compareI64x2 compares each i64 lane and writes an i64 lane mask result.
+func compareI64x2(kind wasmir.InstrKind, lhs [16]byte, rhs [16]byte) [16]byte {
+	var out [16]byte
+	for i := 0; i < len(out); i += 8 {
+		a := binary.LittleEndian.Uint64(lhs[i : i+8])
+		b := binary.LittleEndian.Uint64(rhs[i : i+8])
+		var ok bool
+		switch kind {
+		case wasmir.InstrI64x2Eq:
+			ok = a == b
+		case wasmir.InstrI64x2Ne:
+			ok = a != b
+		case wasmir.InstrI64x2LtS:
+			ok = int64(a) < int64(b)
+		case wasmir.InstrI64x2GtS:
+			ok = int64(a) > int64(b)
+		case wasmir.InstrI64x2LeS:
+			ok = int64(a) <= int64(b)
+		case wasmir.InstrI64x2GeS:
+			ok = int64(a) >= int64(b)
+		}
+		binary.LittleEndian.PutUint64(out[i:i+8], boolMask64(ok))
+	}
+	return out
+}
+
+// compareF32x4 compares each f32 lane and writes an i32 lane mask result.
+func compareF32x4(kind wasmir.InstrKind, lhs [16]byte, rhs [16]byte) [16]byte {
+	var out [16]byte
+	for i := 0; i < len(out); i += 4 {
+		a := math.Float32frombits(binary.LittleEndian.Uint32(lhs[i : i+4]))
+		b := math.Float32frombits(binary.LittleEndian.Uint32(rhs[i : i+4]))
+		var ok bool
+		switch kind {
+		case wasmir.InstrF32x4Eq:
+			ok = a == b
+		case wasmir.InstrF32x4Ne:
+			ok = a != b
+		case wasmir.InstrF32x4Lt:
+			ok = a < b
+		case wasmir.InstrF32x4Gt:
+			ok = a > b
+		case wasmir.InstrF32x4Le:
+			ok = a <= b
+		case wasmir.InstrF32x4Ge:
+			ok = a >= b
+		}
+		binary.LittleEndian.PutUint32(out[i:i+4], boolMask32(ok))
+	}
+	return out
+}
+
+// compareF64x2 compares each f64 lane and writes an i64 lane mask result.
+func compareF64x2(kind wasmir.InstrKind, lhs [16]byte, rhs [16]byte) [16]byte {
+	var out [16]byte
+	for i := 0; i < len(out); i += 8 {
+		a := math.Float64frombits(binary.LittleEndian.Uint64(lhs[i : i+8]))
+		b := math.Float64frombits(binary.LittleEndian.Uint64(rhs[i : i+8]))
+		var ok bool
+		switch kind {
+		case wasmir.InstrF64x2Eq:
+			ok = a == b
+		case wasmir.InstrF64x2Ne:
+			ok = a != b
+		case wasmir.InstrF64x2Lt:
+			ok = a < b
+		case wasmir.InstrF64x2Gt:
+			ok = a > b
+		case wasmir.InstrF64x2Le:
+			ok = a <= b
+		case wasmir.InstrF64x2Ge:
+			ok = a >= b
+		}
+		binary.LittleEndian.PutUint64(out[i:i+8], boolMask64(ok))
+	}
+	return out
+}
+
+// boolMask8 returns a one-byte lane mask for a SIMD comparison result.
+func boolMask8(ok bool) byte {
+	if ok {
+		return 0xff
+	}
+	return 0
+}
+
+// boolMask16 returns a two-byte lane mask for a SIMD comparison result.
+func boolMask16(ok bool) uint16 {
+	if ok {
+		return ^uint16(0)
+	}
+	return 0
+}
+
+// boolMask32 returns a four-byte lane mask for a SIMD comparison result.
+func boolMask32(ok bool) uint32 {
+	if ok {
+		return ^uint32(0)
+	}
+	return 0
+}
+
+// boolMask64 returns an eight-byte lane mask for a SIMD comparison result.
+func boolMask64(ok bool) uint64 {
+	if ok {
+		return ^uint64(0)
+	}
+	return 0
 }
 
 // v128LaneByteOffset validates a SIMD lane index and returns its byte offset.

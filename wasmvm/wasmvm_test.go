@@ -2333,6 +2333,48 @@ func TestV128ShiftAndBitselect(t *testing.T) {
 	checkV128Export(t, inst, "bitselect", v128I32x4(0x00ff0001, 0x00fe0002, 0xffffffff, 0x00000004))
 }
 
+// TestV128Compare checks SIMD integer and floating-point comparison masks.
+func TestV128Compare(t *testing.T) {
+	rt := wasmvm.NewRuntime()
+	inst, err := rt.Instantiate(parseWAT(t, `
+		(module
+			(func (export "i8_lt_s") (result v128)
+				v128.const i32x4 0xff000001 0xe0000002 0x00008003 0x00000004
+				v128.const i32x4 0x02000001 0xe000ff02 0x00000003 0x00008104
+				i8x16.lt_s)
+			(func (export "i16_ge_u") (result v128)
+				v128.const i32x4 0xff000001 0xe0000002 0x00008003 0x00000004
+				v128.const i32x4 0x02000001 0xe000ff02 0x00000003 0x00008104
+				i16x8.ge_u)
+			(func (export "i32_eq") (result v128)
+				v128.const i32x4 0xff000001 0xe0000002 0x00000003 0x77000004
+				v128.const i32x4 0x05000001 0x0e002002 0x44000003 0x00000004
+				i32x4.eq)
+			(func (export "i64_lt_s") (result v128)
+				v128.const i32x4 0xffffffff 0xffffffff 0x00000000 0x80000000
+				v128.const i32x4 0x00000000 0x00000000 0xffffffff 0x7fffffff
+				i64x2.lt_s)
+			(func (export "f32_eq") (result v128)
+				v128.const i32x4 0x00000000 0xffc00000 0x449a5000 0x449a5000
+				v128.const i32x4 0x80000000 0xffc00000 0x449a5000 0x3f800000
+				f32x4.eq)
+			(func (export "f64_gt") (result v128)
+				v128.const i32x4 0x00000000 0x3ff80000 0x00000000 0x3ff80000
+				v128.const i32x4 0x00000000 0xfff80000 0x00000000 0x3ff00000
+				f64x2.gt))
+	`), nil)
+	if err != nil {
+		t.Fatalf("Instantiate failed: %v", err)
+	}
+
+	checkV128Export(t, inst, "i8_lt_s", v128I32x4(0xff000000, 0x00000000, 0x0000ff00, 0x00000000))
+	checkV128Export(t, inst, "i16_ge_u", v128I32x4(0xffffffff, 0xffff0000, 0xffffffff, 0xffff0000))
+	checkV128Export(t, inst, "i32_eq", v128I32x4(0x00000000, 0x00000000, 0x00000000, 0x00000000))
+	checkV128Export(t, inst, "i64_lt_s", v128I32x4(0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff))
+	checkV128Export(t, inst, "f32_eq", v128I32x4(0xffffffff, 0x00000000, 0xffffffff, 0x00000000))
+	checkV128Export(t, inst, "f64_gt", v128I32x4(0x00000000, 0x00000000, 0xffffffff, 0xffffffff))
+}
+
 // v128I32x4 builds the byte representation of a v128 value from i32 lanes.
 func v128I32x4(l0, l1, l2, l3 uint32) [16]byte {
 	return [16]byte{
