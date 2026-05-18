@@ -15,9 +15,6 @@ import (
 // wabtWasmvmUnsupportedFixtures lists WABT fixtures the wasmvm backend still
 // does not support.
 var wabtWasmvmUnsupportedFixtures = []string{
-	// reference-types currently differs in visible function-reference numbering.
-	"reference-types.txt",
-
 	// The SIMD fixture group requires v128 values and SIMD instructions.
 	"simd-basic.txt",
 	"simd-binary.txt",
@@ -151,7 +148,7 @@ func runWABTWasmvm(m *wasmir.Module, exports []wabtExport, imports []wabtImport,
 			results = append(results, result)
 			continue
 		}
-		result.Value, err = wabtWasmvmResultValue(entry.ResultKind, values)
+		result.Value, err = wabtWasmvmResultValue(m, entry.ResultKind, values)
 		if err != nil {
 			return wabtRunResult{}, err
 		}
@@ -395,7 +392,7 @@ func wabtWasmvmZeroResults(resultKind string) ([]wasmvm.Value, error) {
 
 // wabtWasmvmResultValue formats wasmvm call results in the raw form
 // consumed by formatWABTResult.
-func wabtWasmvmResultValue(resultKind string, values []wasmvm.Value) (string, error) {
+func wabtWasmvmResultValue(m *wasmir.Module, resultKind string, values []wasmvm.Value) (string, error) {
 	if resultKind == "void" {
 		if len(values) != 0 {
 			return "", fmt.Errorf("got %d results, want 0", len(values))
@@ -419,7 +416,7 @@ func wabtWasmvmResultValue(resultKind string, values []wasmvm.Value) (string, er
 		if v.Ref.Kind == 0 {
 			return "0", nil
 		}
-		return strconv.FormatUint(uint64(v.Ref.FuncIndex)+1, 10), nil
+		return strconv.FormatUint(wabtWasmvmFuncRefID(m, v.Ref.FuncIndex), 10), nil
 	case "externref":
 		if v.Ref.Kind == 0 {
 			return "0", nil
@@ -428,6 +425,15 @@ func wabtWasmvmResultValue(resultKind string, values []wasmvm.Value) (string, er
 	default:
 		return "", fmt.Errorf("unsupported result kind %q", resultKind)
 	}
+}
+
+// wabtWasmvmFuncRefID maps wasmvm's function index to the numeric funcref ID
+// printed by WABT's interpreter.
+func wabtWasmvmFuncRefID(m *wasmir.Module, funcIndex uint32) uint64 {
+	if m == nil {
+		return uint64(funcIndex) + 1
+	}
+	return uint64(funcIndex) + uint64(len(m.Tables)) + 1
 }
 
 // wabtWasmvmHostPrintArg formats a host-print argument the same way as

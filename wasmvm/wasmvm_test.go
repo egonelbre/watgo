@@ -215,6 +215,64 @@ func TestReferenceInstructions(t *testing.T) {
 	}
 }
 
+// TestReferenceTableAndGlobalOps checks reference values moving through
+// globals and tables.
+func TestReferenceTableAndGlobalOps(t *testing.T) {
+	rt := wasmvm.NewRuntime()
+	inst, err := rt.Instantiate(parseWAT(t, `
+		(module
+			(table $t_func 1 funcref)
+			(table $t_extern 1 externref)
+			(elem funcref (ref.func 2) (ref.null func))
+			(elem externref (ref.null extern))
+			(global $g (mut funcref) (ref.null func))
+
+			(func (export "ref_null_func") (result funcref)
+				ref.null func)
+			(func (export "ref_null_extern") (result externref)
+				ref.null extern)
+			(func $ref_is_null_func (export "ref_is_null_func") (result i32)
+				global.get $g
+				ref.is_null)
+			(func $ref_func (export "ref_func") (result funcref)
+				ref.func $ref_is_null_func)
+			(func $table_set (export "table_set")
+				i32.const 0
+				call $ref_func
+				table.set $t_func)
+			(func (export "table_get") (result i32)
+				call $table_set
+				i32.const 0
+				table.get $t_func
+				ref.is_null)
+			(func $global_set (export "global_set") (result funcref)
+				ref.func $ref_is_null_func
+				global.set $g
+				global.get $g))
+	`), nil)
+	if err != nil {
+		t.Fatalf("Instantiate failed: %v", err)
+	}
+
+	results := callExport(t, inst, "ref_is_null_func")
+	if len(results) != 1 || results[0] != wasmvm.I32(1) {
+		t.Fatalf("ref_is_null_func got results %#v, want i32 1", results)
+	}
+	results = callExport(t, inst, "ref_func")
+	if len(results) != 1 || !results[0].Type.IsRef() || results[0].Ref.FuncIndex != 2 {
+		t.Fatalf("ref_func got results %#v, want function reference 2", results)
+	}
+	callExport(t, inst, "table_set")
+	results = callExport(t, inst, "table_get")
+	if len(results) != 1 || results[0] != wasmvm.I32(0) {
+		t.Fatalf("table_get got results %#v, want i32 0", results)
+	}
+	results = callExport(t, inst, "global_set")
+	if len(results) != 1 || !results[0].Type.IsRef() || results[0].Ref.FuncIndex != 2 {
+		t.Fatalf("global_set got results %#v, want function reference 2", results)
+	}
+}
+
 // TestTableBasics checks module-defined table instantiation, active element
 // initialization, table.size, table.get, and table.set.
 func TestTableBasics(t *testing.T) {
