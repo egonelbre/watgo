@@ -15,10 +15,6 @@ import (
 // wabtWasmvmUnsupportedFixtures lists WABT fixtures the wasmvm backend still
 // does not support.
 var wabtWasmvmUnsupportedFixtures = []string{
-	// import currently needs duplicate synthetic import handling in the WABT
-	// harness before it can exercise wasmvm.
-	"import.txt",
-
 	// reference-types currently differs in visible function-reference numbering.
 	"reference-types.txt",
 
@@ -32,6 +28,17 @@ var wabtWasmvmUnsupportedFixtures = []string{
 	"simd-shift.txt",
 	"simd-splat.txt",
 	"simd-unary.txt",
+}
+
+type wabtWasmvmImportBinding struct {
+	// imported is the original WABT-visible import metadata used for signature
+	// construction and stdout formatting.
+	imported wabtImport
+
+	// resolveModule and resolveName are the internal names used in
+	// wasmvm.Imports after the module import is rewritten.
+	resolveModule string
+	resolveName   string
 }
 
 // wabtWasmvmBackend returns the wasmvm-backed WABT interp execution
@@ -94,13 +101,17 @@ func runWABTWasmvm(m *wasmir.Module, exports []wabtExport, imports []wabtImport,
 	}
 
 	stdout := []string{}
-	vmImports, err := wabtWasmvmImports(imports, hostPrint, dummyImportFunc, hostPrintResultKind, &stdout)
+	vmModule, importBindings, err := wabtWasmvmBindImports(m, imports)
+	if err != nil {
+		return wabtRunResult{}, err
+	}
+	vmImports, err := wabtWasmvmImports(importBindings, hostPrint, dummyImportFunc, hostPrintResultKind, &stdout)
 	if err != nil {
 		return wabtRunResult{}, err
 	}
 
 	rt := wasmvm.NewRuntime()
-	inst, err := rt.Instantiate(m, vmImports)
+	inst, err := rt.Instantiate(vmModule, vmImports)
 	if err != nil {
 		return wabtRunResult{Stderr: normalizeWABTWasmvmInstantiateError(err), ExitCode: 1}, nil
 	}
@@ -153,9 +164,41 @@ func runWABTWasmvm(m *wasmir.Module, exports []wabtExport, imports []wabtImport,
 	}, nil
 }
 
+// wabtWasmvmBindImports rewrites function import names to unique internal
+// names for wasmvm import resolution.
+func wabtWasmvmBindImports(m *wasmir.Module, imports []wabtImport) (*wasmir.Module, []wabtWasmvmImportBinding, error) {
+	vmModule := *m
+	vmModule.Imports = slices.Clone(m.Imports)
+
+	bindings := make([]wabtWasmvmImportBinding, 0, len(imports))
+	importIndex := 0
+	for i := range vmModule.Imports {
+		imp := &vmModule.Imports[i]
+		if imp.Kind != wasmir.ExternalKindFunction {
+			continue
+		}
+		if importIndex >= len(imports) {
+			return nil, nil, fmt.Errorf("module has more function imports than WABT import metadata")
+		}
+
+		resolveName := fmt.Sprintf("__wabt_import_%d", importIndex)
+		bindings = append(bindings, wabtWasmvmImportBinding{
+			imported:      imports[importIndex],
+			resolveModule: imp.Module,
+			resolveName:   resolveName,
+		})
+		imp.Name = resolveName
+		importIndex++
+	}
+	if importIndex != len(imports) {
+		return nil, nil, fmt.Errorf("WABT import metadata has %d entries, module has %d function imports", len(imports), importIndex)
+	}
+	return &vmModule, bindings, nil
+}
+
 // wabtWasmvmImports builds the synthetic host imports requested by WABT
 // run-interp flags.
-func wabtWasmvmImports(imports []wabtImport, hostPrint bool, dummyImportFunc bool, hostPrintResultKind string, stdout *[]string) (wasmvm.Imports, error) {
+func wabtWasmvmImports(imports []wabtWasmvmImportBinding, hostPrint bool, dummyImportFunc bool, hostPrintResultKind string, stdout *[]string) (wasmvm.Imports, error) {
 	var out wasmvm.Imports
 	add := func(module string, name string, host wasmvm.HostFunc) error {
 		if out == nil {
@@ -171,15 +214,15 @@ func wabtWasmvmImports(imports []wabtImport, hostPrint bool, dummyImportFunc boo
 		return nil
 	}
 
-	for _, imported := range imports {
-		imported := imported
+	for _, binding := range imports {
+		imported := binding.imported
 		switch {
 		case hostPrint && imported.Module == "host" && imported.Name == "print":
 			host, err := wabtWasmvmHostPrint(imported, hostPrintResultKind, stdout)
 			if err != nil {
 				return nil, err
 			}
-			if err := add(imported.Module, imported.Name, host); err != nil {
+			if err := add(binding.resolveModule, binding.resolveName, host); err != nil {
 				return nil, err
 			}
 		case dummyImportFunc:
@@ -187,7 +230,7 @@ func wabtWasmvmImports(imports []wabtImport, hostPrint bool, dummyImportFunc boo
 			if err != nil {
 				return nil, err
 			}
-			if err := add(imported.Module, imported.Name, host); err != nil {
+			if err := add(binding.resolveModule, binding.resolveName, host); err != nil {
 				return nil, err
 			}
 		}
