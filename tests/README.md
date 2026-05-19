@@ -2,7 +2,8 @@
 
 This directory holds watgo's end-to-end and integration-style test corpora.
 The corpora are chosen to be self-testing - the WAT modules compiled by watgo
-get executed (using Node.js) and results compared to expected results.
+get executed and results are compared to expected results. Broad compatibility
+coverage uses Node.js, and selected suites also run through `wasmvm`.
 
 When applicable, the test harnesses also use the WAT code in these corpora to
 run roundtrip printing tests (where the functionality of the `printer` package
@@ -14,7 +15,7 @@ is exercised).
   - Upstream source: WebAssembly spec `test/core`
   - Repo: <https://github.com/WebAssembly/spec>
   - Content: `.wast` spec scripts
-  - Harness: `tests/wasmspec/wasmspec_harness.go`
+  - Harness: `tests/wasmspec/wasmspec_test.go`
 
 - `wabt-interp/`
   - Upstream source: WABT `test/interp`

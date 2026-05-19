@@ -2,7 +2,6 @@ package tests
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,6 +17,13 @@ import (
 
 const wasmSpecScriptsDir = "scripts"
 const wasmSpecDebugEnvVar = "WATGO_WASMSPEC_DEBUG"
+
+type wasmSpecBackend struct {
+	name                string
+	scripts             []string
+	requiresIntegration bool
+	run                 func(t *testing.T, scriptPath string, commands []scriptCommand, opts runOptions) []commandResult
+}
 
 // wasmSpecPrintRoundTripSkippedScripts lists wasmspec scripts intentionally
 // excluded from the broad print-roundtrip pass.
@@ -47,26 +53,51 @@ func wasmSpecDebugEnabled() bool {
 	return os.Getenv(wasmSpecDebugEnvVar) != ""
 }
 
+// TestWasmSpecScripts runs the WebAssembly spec scripts through the Node.js
+// backend.
 func TestWasmSpecScripts(t *testing.T) {
-	if os.Getenv("WATGO_INTEGRATION") == "0" {
+	runWasmSpecBackend(t, wasmSpecNodeBackend())
+}
+
+// TestWasmSpecScriptsWasmvm runs the WebAssembly spec scripts currently enabled
+// for the wasmvm backend.
+func TestWasmSpecScriptsWasmvm(t *testing.T) {
+	runWasmSpecBackend(t, wasmSpecWasmvmBackend(t))
+}
+
+// TestWasmSpecScriptsPrintRoundTrip checks wasmspec module print stability.
+func TestWasmSpecScriptsPrintRoundTrip(t *testing.T) {
+	runWasmSpecScriptFiles(t, nil, checkWasmSpecScriptPrintRoundTrip)
+}
+
+// runWasmSpecBackend runs one execution backend against its configured script
+// set.
+func runWasmSpecBackend(t *testing.T, backend wasmSpecBackend) {
+	t.Helper()
+
+	if backend.requiresIntegration && os.Getenv("WATGO_INTEGRATION") == "0" {
 		t.Skip("integration tests disabled with WATGO_INTEGRATION=0")
 	}
 
-	runWasmSpecScriptsWith(t, runWasmSpecScriptFile)
+	runWasmSpecScriptFiles(t, backend.scripts, func(t *testing.T, scriptPath string) {
+		runWasmSpecScriptWithBackend(t, backend, scriptPath)
+	})
 }
 
-func TestWasmSpecScriptsPrintRoundTrip(t *testing.T) {
-	runWasmSpecScriptsWith(t, checkWasmSpecScriptPrintRoundTrip)
-}
-
-// runWasmSpecScriptsWith discovers the wasmspec script files once and runs fn
+// runWasmSpecScriptFiles discovers or accepts wasmspec script files and runs fn
 // for each script as its own subtest.
-func runWasmSpecScriptsWith(t *testing.T, fn func(t *testing.T, scriptPath string)) {
+func runWasmSpecScriptFiles(t *testing.T, scripts []string, fn func(t *testing.T, scriptPath string)) {
 	t.Helper()
 
-	scripts, err := findWasmSpecScripts(wasmSpecScriptsDir)
-	if err != nil {
-		t.Fatalf("findWasmSpecScripts %q failed: %v", wasmSpecScriptsDir, err)
+	if len(scripts) == 0 {
+		var err error
+		scripts, err = findWasmSpecScripts(wasmSpecScriptsDir)
+		if err != nil {
+			t.Fatalf("findWasmSpecScripts %q failed: %v", wasmSpecScriptsDir, err)
+		}
+		for i, script := range scripts {
+			scripts[i] = filepath.Join(wasmSpecScriptsDir, script)
+		}
 	}
 	sort.Strings(scripts)
 
@@ -75,13 +106,21 @@ func runWasmSpecScriptsWith(t *testing.T, fn func(t *testing.T, scriptPath strin
 	}
 
 	for _, script := range scripts {
-		name := filepath.ToSlash(strings.TrimSuffix(script, filepath.Ext(script)))
+		name := wasmSpecScriptTestName(script)
 		t.Run(name, func(t *testing.T) {
-			fn(t, filepath.Join(wasmSpecScriptsDir, script))
+			fn(t, script)
 		})
 	}
 }
 
+// wasmSpecScriptTestName returns the subtest name for a script path.
+func wasmSpecScriptTestName(scriptPath string) string {
+	name := filepath.ToSlash(scriptPath)
+	name = strings.TrimPrefix(name, filepath.ToSlash(wasmSpecScriptsDir)+"/")
+	return strings.TrimSuffix(name, filepath.Ext(name))
+}
+
+// findWasmSpecScripts returns all .wast scripts below root, relative to root.
 func findWasmSpecScripts(root string) ([]string, error) {
 	var scripts []string
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
@@ -101,7 +140,9 @@ func findWasmSpecScripts(root string) ([]string, error) {
 	return scripts, err
 }
 
-func runWasmSpecScriptFile(t *testing.T, scriptPath string) {
+// runWasmSpecScriptWithBackend parses one script, runs it through backend, and
+// reports command-level failures.
+func runWasmSpecScriptWithBackend(t *testing.T, backend wasmSpecBackend, scriptPath string) {
 	t.Helper()
 
 	src, err := os.ReadFile(scriptPath)
@@ -134,28 +175,10 @@ func runWasmSpecScriptFile(t *testing.T, scriptPath string) {
 			fmt.Fprintf(os.Stderr, "[wasmspec %s] done command %d/%d: %s at %s -> %s (%s)\n",
 				scriptName, index+1, total, cmd.kind, cmd.loc, status, elapsed)
 		}
-		fmt.Fprintf(os.Stderr, "[wasmspec %s] starting runner.run with %d commands\n", scriptName, len(commands))
+		fmt.Fprintf(os.Stderr, "[wasmspec %s %s] starting backend with %d commands\n", backend.name, scriptName, len(commands))
 	}
 
-	runner, err := newScriptRunner(context.Background())
-	if err != nil {
-		t.Fatalf("spec runner bootstrap failed: %v", err)
-	}
-	defer func() {
-		if wasmSpecDebugEnabled() {
-			fmt.Fprintf(os.Stderr, "[wasmspec %s] closing node runner\n", filepath.ToSlash(scriptPath))
-		}
-		if closeErr := runner.closeWithLogf(logf); closeErr != nil {
-			t.Fatalf("spec runner close failed: %v", closeErr)
-		}
-		if wasmSpecDebugEnabled() {
-			fmt.Fprintf(os.Stderr, "[wasmspec %s] closed node runner\n", filepath.ToSlash(scriptPath))
-		}
-	}()
-	results := runner.run(commands, opts)
-	if wasmSpecDebugEnabled() {
-		fmt.Fprintf(os.Stderr, "[wasmspec %s] finished runner.run\n", filepath.ToSlash(scriptPath))
-	}
+	results := backend.run(t, scriptPath, commands, opts)
 	if got, want := len(results), len(commands); got != want {
 		t.Fatalf("got %d command results, want %d", got, want)
 	}
