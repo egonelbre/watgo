@@ -19,7 +19,7 @@ is exercised).
 - `wabt-interp/`
   - Upstream source: WABT `test/interp`
   - Repo: <https://github.com/WebAssembly/wabt>
-  - Content: `.txt` fixtures
+  - Content: `scripts/*.txt` fixtures
   - Harness: `tests/wabt-interp/wabt_test.go`
 
 - `wasm-wat-samples/`

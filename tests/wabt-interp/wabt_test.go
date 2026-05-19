@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
@@ -92,6 +93,8 @@ type wabtBackend struct {
 	run                 func(t *testing.T, fixture wabtCompiledFixture) (wabtRunResult, error)
 }
 
+const wabtScriptsDir = "scripts"
+
 // wabtSkippedFixtures lists WABT fixtures we keep in-tree but do not run
 // through this harness yet.
 var wabtSkippedFixtures = []string{
@@ -137,7 +140,7 @@ var wabtSkippedFixtures = []string{
 }
 
 func wabtShouldSkipFixture(name string) bool {
-	return slices.Contains(wabtSkippedFixtures, name)
+	return slices.Contains(wabtSkippedFixtures, filepath.Base(name))
 }
 
 // TestWABTNode runs WABT interp fixtures through the Node backend.
@@ -177,7 +180,7 @@ func runWABTBackend(t *testing.T, backend wabtBackend) {
 func discoverWABTFixtures(t *testing.T) []string {
 	t.Helper()
 
-	entries, err := os.ReadDir(".")
+	entries, err := os.ReadDir(wabtScriptsDir)
 	if err != nil {
 		t.Fatalf("ReadDir failed: %v", err)
 	}
@@ -186,7 +189,7 @@ func discoverWABTFixtures(t *testing.T) []string {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".txt") {
 			continue
 		}
-		files = append(files, entry.Name())
+		files = append(files, filepath.Join(wabtScriptsDir, entry.Name()))
 	}
 	sort.Strings(files)
 	return files
@@ -204,7 +207,7 @@ func runWABTFixtureFiles(t *testing.T, files []string, fn func(t *testing.T, pat
 	}
 
 	for _, file := range files {
-		t.Run(strings.TrimSuffix(file, ".txt"), func(t *testing.T) {
+		t.Run(strings.TrimSuffix(filepath.Base(file), ".txt"), func(t *testing.T) {
 			if wabtShouldSkipFixture(file) {
 				t.Skip("fixture is intentionally not covered by this harness")
 			}
