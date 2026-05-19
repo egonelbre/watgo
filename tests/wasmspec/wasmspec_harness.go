@@ -3075,16 +3075,19 @@ func matchesExpectedFailureText(got, want string) bool {
 	}
 	if wantLower == "out of bounds table access" {
 		return strings.Contains(gotLower, "invalid table access") ||
+			strings.Contains(gotLower, "table access out of bounds") ||
 			strings.Contains(gotLower, "unreachable") ||
 			strings.Contains(gotLower, "table index is out of bounds") ||
 			strings.Contains(gotLower, "element segment out of bounds")
 	}
 	if wantLower == "undefined element" {
 		return strings.Contains(gotLower, "invalid table access") ||
+			strings.Contains(gotLower, "table access out of bounds") ||
 			strings.Contains(gotLower, "table index is out of bounds")
 	}
 	if wantLower == "uninitialized element" || strings.HasPrefix(wantLower, "uninitialized element ") {
 		return strings.Contains(gotLower, "invalid table access") ||
+			strings.Contains(gotLower, "indirect call to null reference") ||
 			strings.Contains(gotLower, "null function or function signature mismatch")
 	}
 	if wantLower == "indirect call type mismatch" {
@@ -3104,7 +3107,8 @@ func matchesExpectedFailureText(got, want string) bool {
 	if wantLower == "out of bounds memory access" {
 		return strings.Contains(gotLower, "memory access out of bounds") ||
 			strings.Contains(gotLower, "data segment out of bounds") ||
-			strings.Contains(gotLower, "data segment") && strings.Contains(gotLower, "out of bounds")
+			strings.Contains(gotLower, "data segment") && strings.Contains(gotLower, "out of bounds") ||
+			strings.Contains(gotLower, "data segment") && strings.Contains(gotLower, "dropped")
 	}
 	if wantLower == "null array reference" {
 		return strings.Contains(gotLower, "dereferencing a null pointer")
@@ -3116,7 +3120,8 @@ func matchesExpectedFailureText(got, want string) bool {
 		return strings.Contains(gotLower, "dereferencing a null pointer")
 	}
 	if wantLower == "null function reference" {
-		return strings.Contains(gotLower, "dereferencing a null pointer")
+		return strings.Contains(gotLower, "dereferencing a null pointer") ||
+			strings.Contains(gotLower, "call_ref to null reference")
 	}
 	if wantLower == "null i31 reference" {
 		return strings.Contains(gotLower, "dereferencing a null pointer")

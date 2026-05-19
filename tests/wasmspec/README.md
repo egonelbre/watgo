@@ -48,6 +48,9 @@ The Node backend is the broad compatibility backend and runs the full corpus.
 The `wasmvm` backend runs an explicit script list that should grow as VM
 coverage grows.
 
+For local triage, `WATGO_WASMSPEC_WASMVM_SCRIPTS` can override the `wasmvm`
+script list with comma-separated `scripts/...` paths.
+
 ### Node Runtime
 
 [node_wasm_runner.js](./node_wasm_runner.js) keeps one Node process alive for

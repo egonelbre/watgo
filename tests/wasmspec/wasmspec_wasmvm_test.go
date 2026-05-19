@@ -3,6 +3,7 @@ package tests
 import (
 	"fmt"
 	"math"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -14,10 +15,93 @@ import (
 	"github.com/eliben/watgo/wasmvm"
 )
 
-// Allow list for scripts
+const wasmSpecWasmvmScriptsEnvVar = "WATGO_WASMSPEC_WASMVM_SCRIPTS"
+
+// wasmSpecWasmvmScripts lists spec scripts that currently pass through the
+// wasmvm backend. Keep this as an allow list so newly synced upstream scripts
+// or partially implemented VM features do not silently weaken coverage.
 var wasmSpecWasmvmScripts = []string{
+	"scripts/address.wast",
+	"scripts/align.wast",
+	"scripts/block.wast",
+	"scripts/br_on_non_null.wast",
+	"scripts/bulk-memory/memory_copy.wast",
+	"scripts/bulk-memory/memory_fill.wast",
+	"scripts/bulk-memory/memory_init.wast",
+	"scripts/bulk-memory/table-sub.wast",
+	"scripts/call_ref.wast",
+	"scripts/comments.wast",
+	"scripts/const.wast",
+	"scripts/conversions.wast",
+	"scripts/custom.wast",
+	"scripts/endianness.wast",
+	"scripts/f32_bitwise.wast",
+	"scripts/f32_cmp.wast",
+	"scripts/f64_bitwise.wast",
+	"scripts/f64_cmp.wast",
+	"scripts/float_exprs.wast",
+	"scripts/float_literals.wast",
+	"scripts/float_memory.wast",
+	"scripts/float_misc.wast",
+	"scripts/forward.wast",
 	"scripts/i32.wast",
+	"scripts/i64.wast",
+	"scripts/id.wast",
+	"scripts/if.wast",
+	"scripts/int_exprs.wast",
+	"scripts/int_literals.wast",
+	"scripts/labels.wast",
+	"scripts/left-to-right.wast",
+	"scripts/load.wast",
+	"scripts/local_get.wast",
+	"scripts/local_set.wast",
+	"scripts/local_tee.wast",
+	"scripts/memory_redundancy.wast",
+	"scripts/memory_size.wast",
 	"scripts/nop.wast",
+	"scripts/obsolete-keywords.wast",
+	"scripts/ref.wast",
+	"scripts/ref_as_non_null.wast",
+	"scripts/ref_null.wast",
+	"scripts/return.wast",
+	"scripts/simd/simd_address.wast",
+	"scripts/simd/simd_bit_shift.wast",
+	"scripts/simd/simd_bitwise.wast",
+	"scripts/simd/simd_boolean.wast",
+	"scripts/simd/simd_f32x4.wast",
+	"scripts/simd/simd_f32x4_arith.wast",
+	"scripts/simd/simd_f32x4_cmp.wast",
+	"scripts/simd/simd_f64x2.wast",
+	"scripts/simd/simd_f64x2_arith.wast",
+	"scripts/simd/simd_f64x2_cmp.wast",
+	"scripts/simd/simd_i16x8_arith.wast",
+	"scripts/simd/simd_i16x8_cmp.wast",
+	"scripts/simd/simd_i16x8_sat_arith.wast",
+	"scripts/simd/simd_i32x4_arith.wast",
+	"scripts/simd/simd_i32x4_cmp.wast",
+	"scripts/simd/simd_i32x4_trunc_sat_f32x4.wast",
+	"scripts/simd/simd_i64x2_arith.wast",
+	"scripts/simd/simd_i64x2_cmp.wast",
+	"scripts/simd/simd_i8x16_arith.wast",
+	"scripts/simd/simd_i8x16_cmp.wast",
+	"scripts/simd/simd_i8x16_sat_arith.wast",
+	"scripts/simd/simd_load.wast",
+	"scripts/simd/simd_load_splat.wast",
+	"scripts/simd/simd_select.wast",
+	"scripts/simd/simd_store.wast",
+	"scripts/stack.wast",
+	"scripts/store.wast",
+	"scripts/table_size.wast",
+	"scripts/traps.wast",
+	"scripts/type-canon.wast",
+	"scripts/type.wast",
+	"scripts/unreachable.wast",
+	"scripts/unreached-invalid.wast",
+	"scripts/unreached-valid.wast",
+	"scripts/utf8-custom-section-id.wast",
+	"scripts/utf8-import-field.wast",
+	"scripts/utf8-import-module.wast",
+	"scripts/utf8-invalid-encoding.wast",
 }
 
 type wasmSpecWasmvmRunner struct {
@@ -36,9 +120,27 @@ func wasmSpecWasmvmBackend(t *testing.T) wasmSpecBackend {
 
 	return wasmSpecBackend{
 		name:    "wasmvm",
-		scripts: wasmSpecWasmvmScripts,
+		scripts: wasmSpecWasmvmSelectedScripts(),
 		run:     runWasmSpecWasmvmScript,
 	}
+}
+
+// wasmSpecWasmvmSelectedScripts returns the wasmvm script list, optionally
+// overridden by a comma-separated environment variable for coverage triage.
+func wasmSpecWasmvmSelectedScripts() []string {
+	override := os.Getenv(wasmSpecWasmvmScriptsEnvVar)
+	if override == "" {
+		return wasmSpecWasmvmScripts
+	}
+	var scripts []string
+	for _, entry := range strings.Split(override, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		scripts = append(scripts, entry)
+	}
+	return scripts
 }
 
 // newWasmSpecWasmvmRunner creates an empty wasmvm script runner.
