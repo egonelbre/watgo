@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -17,91 +18,98 @@ import (
 
 const wasmSpecWasmvmScriptsEnvVar = "WATGO_WASMSPEC_WASMVM_SCRIPTS"
 
-// wasmSpecWasmvmScripts lists spec scripts that currently pass through the
-// wasmvm backend. Keep this as an allow list so newly synced upstream scripts
-// or partially implemented VM features do not silently weaken coverage.
-var wasmSpecWasmvmScripts = []string{
-	"scripts/address.wast",
-	"scripts/align.wast",
-	"scripts/block.wast",
-	"scripts/br_on_non_null.wast",
-	"scripts/bulk-memory/memory_copy.wast",
-	"scripts/bulk-memory/memory_fill.wast",
-	"scripts/bulk-memory/memory_init.wast",
-	"scripts/bulk-memory/table-sub.wast",
-	"scripts/call_ref.wast",
-	"scripts/comments.wast",
-	"scripts/const.wast",
-	"scripts/conversions.wast",
-	"scripts/custom.wast",
-	"scripts/endianness.wast",
-	"scripts/f32_bitwise.wast",
-	"scripts/f32_cmp.wast",
-	"scripts/f64_bitwise.wast",
-	"scripts/f64_cmp.wast",
-	"scripts/float_exprs.wast",
-	"scripts/float_literals.wast",
-	"scripts/float_memory.wast",
-	"scripts/float_misc.wast",
-	"scripts/forward.wast",
-	"scripts/i32.wast",
-	"scripts/i64.wast",
-	"scripts/id.wast",
-	"scripts/if.wast",
-	"scripts/int_exprs.wast",
-	"scripts/int_literals.wast",
-	"scripts/labels.wast",
-	"scripts/left-to-right.wast",
-	"scripts/load.wast",
-	"scripts/local_get.wast",
-	"scripts/local_set.wast",
-	"scripts/local_tee.wast",
-	"scripts/memory_redundancy.wast",
-	"scripts/memory_size.wast",
-	"scripts/nop.wast",
-	"scripts/obsolete-keywords.wast",
-	"scripts/ref.wast",
-	"scripts/ref_as_non_null.wast",
-	"scripts/ref_null.wast",
-	"scripts/return.wast",
-	"scripts/simd/simd_address.wast",
-	"scripts/simd/simd_bit_shift.wast",
-	"scripts/simd/simd_bitwise.wast",
-	"scripts/simd/simd_boolean.wast",
-	"scripts/simd/simd_f32x4.wast",
-	"scripts/simd/simd_f32x4_arith.wast",
-	"scripts/simd/simd_f32x4_cmp.wast",
-	"scripts/simd/simd_f64x2.wast",
-	"scripts/simd/simd_f64x2_arith.wast",
-	"scripts/simd/simd_f64x2_cmp.wast",
-	"scripts/simd/simd_i16x8_arith.wast",
-	"scripts/simd/simd_i16x8_cmp.wast",
-	"scripts/simd/simd_i16x8_sat_arith.wast",
-	"scripts/simd/simd_i32x4_arith.wast",
-	"scripts/simd/simd_i32x4_cmp.wast",
-	"scripts/simd/simd_i32x4_trunc_sat_f32x4.wast",
-	"scripts/simd/simd_i64x2_arith.wast",
-	"scripts/simd/simd_i64x2_cmp.wast",
-	"scripts/simd/simd_i8x16_arith.wast",
-	"scripts/simd/simd_i8x16_cmp.wast",
-	"scripts/simd/simd_i8x16_sat_arith.wast",
-	"scripts/simd/simd_load.wast",
-	"scripts/simd/simd_load_splat.wast",
-	"scripts/simd/simd_select.wast",
-	"scripts/simd/simd_store.wast",
-	"scripts/stack.wast",
-	"scripts/store.wast",
-	"scripts/table_size.wast",
-	"scripts/traps.wast",
-	"scripts/type-canon.wast",
-	"scripts/type.wast",
-	"scripts/unreachable.wast",
-	"scripts/unreached-invalid.wast",
-	"scripts/unreached-valid.wast",
-	"scripts/utf8-custom-section-id.wast",
-	"scripts/utf8-import-field.wast",
-	"scripts/utf8-import-module.wast",
-	"scripts/utf8-invalid-encoding.wast",
+// wasmSpecWasmvmDeniedScripts lists spec scripts not currently run through the
+// wasmvm backend. Entries ending in "/" deny an entire directory subtree.
+var wasmSpecWasmvmDeniedScripts = []string{
+	"scripts/exceptions/",
+	"scripts/gc/",
+	"scripts/memory64/",
+	"scripts/multi-memory/",
+	"scripts/relaxed-simd/",
+
+	"scripts/annotations.wast",
+	"scripts/binary-leb128.wast",
+	"scripts/binary.wast",
+	"scripts/br.wast",
+	"scripts/br_if.wast",
+	"scripts/br_on_null.wast",
+	"scripts/br_table.wast",
+	"scripts/bulk-memory/bulk.wast",
+	"scripts/bulk-memory/table_copy.wast",
+	"scripts/bulk-memory/table_fill.wast",
+	"scripts/bulk-memory/table_init.wast",
+	"scripts/call.wast",
+	"scripts/call_indirect.wast",
+	"scripts/data.wast",
+	"scripts/elem.wast",
+	"scripts/exports.wast",
+	"scripts/f32.wast",
+	"scripts/f64.wast",
+	"scripts/fac.wast",
+	"scripts/func.wast",
+	"scripts/func_ptrs.wast",
+	"scripts/global.wast",
+	"scripts/imports.wast",
+	"scripts/inline-module.wast",
+	"scripts/instance.wast",
+	"scripts/linking.wast",
+	"scripts/local_init.wast",
+	"scripts/loop.wast",
+	"scripts/memory.wast",
+	"scripts/memory_grow.wast",
+	"scripts/memory_trap.wast",
+	"scripts/names.wast",
+	"scripts/ref_func.wast",
+	"scripts/ref_is_null.wast",
+	"scripts/return_call.wast",
+	"scripts/return_call_indirect.wast",
+	"scripts/return_call_ref.wast",
+	"scripts/select.wast",
+	"scripts/simd/simd_align.wast",
+	"scripts/simd/simd_const.wast",
+	"scripts/simd/simd_conversions.wast",
+	"scripts/simd/simd_f32x4_pmin_pmax.wast",
+	"scripts/simd/simd_f32x4_rounding.wast",
+	"scripts/simd/simd_f64x2_pmin_pmax.wast",
+	"scripts/simd/simd_f64x2_rounding.wast",
+	"scripts/simd/simd_i16x8_arith2.wast",
+	"scripts/simd/simd_i16x8_extadd_pairwise_i8x16.wast",
+	"scripts/simd/simd_i16x8_extmul_i8x16.wast",
+	"scripts/simd/simd_i16x8_q15mulr_sat_s.wast",
+	"scripts/simd/simd_i32x4_arith2.wast",
+	"scripts/simd/simd_i32x4_dot_i16x8.wast",
+	"scripts/simd/simd_i32x4_extadd_pairwise_i16x8.wast",
+	"scripts/simd/simd_i32x4_extmul_i16x8.wast",
+	"scripts/simd/simd_i32x4_trunc_sat_f64x2.wast",
+	"scripts/simd/simd_i64x2_arith2.wast",
+	"scripts/simd/simd_i64x2_extmul_i32x4.wast",
+	"scripts/simd/simd_i8x16_arith2.wast",
+	"scripts/simd/simd_int_to_int_extend.wast",
+	"scripts/simd/simd_lane.wast",
+	"scripts/simd/simd_linking.wast",
+	"scripts/simd/simd_load16_lane.wast",
+	"scripts/simd/simd_load32_lane.wast",
+	"scripts/simd/simd_load64_lane.wast",
+	"scripts/simd/simd_load8_lane.wast",
+	"scripts/simd/simd_load_extend.wast",
+	"scripts/simd/simd_load_zero.wast",
+	"scripts/simd/simd_memory-multi.wast",
+	"scripts/simd/simd_splat.wast",
+	"scripts/simd/simd_store16_lane.wast",
+	"scripts/simd/simd_store32_lane.wast",
+	"scripts/simd/simd_store64_lane.wast",
+	"scripts/simd/simd_store8_lane.wast",
+	"scripts/skip-stack-guard-page.wast",
+	"scripts/start.wast",
+	"scripts/switch.wast",
+	"scripts/table.wast",
+	"scripts/table_get.wast",
+	"scripts/table_grow.wast",
+	"scripts/table_set.wast",
+	"scripts/token.wast",
+	"scripts/type-equivalence.wast",
+	"scripts/type-rec.wast",
+	"scripts/unwind.wast",
 }
 
 type wasmSpecWasmvmRunner struct {
@@ -120,17 +128,19 @@ func wasmSpecWasmvmBackend(t *testing.T) wasmSpecBackend {
 
 	return wasmSpecBackend{
 		name:    "wasmvm",
-		scripts: wasmSpecWasmvmSelectedScripts(),
+		scripts: wasmSpecWasmvmSelectedScripts(t),
 		run:     runWasmSpecWasmvmScript,
 	}
 }
 
 // wasmSpecWasmvmSelectedScripts returns the wasmvm script list, optionally
 // overridden by a comma-separated environment variable for coverage triage.
-func wasmSpecWasmvmSelectedScripts() []string {
+func wasmSpecWasmvmSelectedScripts(t *testing.T) []string {
+	t.Helper()
+
 	override := os.Getenv(wasmSpecWasmvmScriptsEnvVar)
 	if override == "" {
-		return wasmSpecWasmvmScripts
+		return wasmSpecWasmvmDiscoveredScripts(t)
 	}
 	var scripts []string
 	for _, entry := range strings.Split(override, ",") {
@@ -141,6 +151,44 @@ func wasmSpecWasmvmSelectedScripts() []string {
 		scripts = append(scripts, entry)
 	}
 	return scripts
+}
+
+// wasmSpecWasmvmDiscoveredScripts returns all checked-in wasmspec scripts
+// except entries currently denied for the wasmvm backend.
+func wasmSpecWasmvmDiscoveredScripts(t *testing.T) []string {
+	t.Helper()
+
+	scripts, err := findWasmSpecScripts(wasmSpecScriptsDir)
+	if err != nil {
+		t.Fatalf("findWasmSpecScripts %q failed: %v", wasmSpecScriptsDir, err)
+	}
+	var selected []string
+	for _, script := range scripts {
+		scriptPath := filepath.ToSlash(filepath.Join(wasmSpecScriptsDir, script))
+		if wasmSpecWasmvmScriptDenied(scriptPath) {
+			continue
+		}
+		selected = append(selected, scriptPath)
+	}
+	return selected
+}
+
+// wasmSpecWasmvmScriptDenied reports whether scriptPath is denied for wasmvm.
+func wasmSpecWasmvmScriptDenied(scriptPath string) bool {
+	scriptPath = filepath.ToSlash(scriptPath)
+	for _, denied := range wasmSpecWasmvmDeniedScripts {
+		denied = filepath.ToSlash(denied)
+		if strings.HasSuffix(denied, "/") {
+			if strings.HasPrefix(scriptPath, denied) {
+				return true
+			}
+			continue
+		}
+		if scriptPath == denied {
+			return true
+		}
+	}
+	return false
 }
 
 // newWasmSpecWasmvmRunner creates an empty wasmvm script runner.
