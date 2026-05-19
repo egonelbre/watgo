@@ -2,8 +2,9 @@
 // modules.
 //
 // The package can instantiate an already-validated wasmir.Module, look up
-// exported functions, call them with runtime values, and satisfy WebAssembly
-// function imports with Go callbacks.
+// exported functions and memories, call functions with runtime values, satisfy
+// WebAssembly function imports with Go callbacks, and share exported memories
+// with later instantiations.
 package wasmvm
 
 import (
@@ -75,16 +76,14 @@ func ExternRef(id uint64) Value {
 // Imports maps WebAssembly import module names and field names to host externs.
 //
 // For an import such as (import "env" "inc" (func ...)), the corresponding
-// Go value belongs at imports["env"]["inc"]. Only function imports are
-// supported for now, so the extern value should be a HostFunc created with
-// NewHostFunc.
+// Go value belongs at imports["env"]["inc"]. Function imports should be a
+// HostFunc created with NewHostFunc. Memory imports should be a *Memory
+// obtained from another instantiated module's ExportedMemory method.
 type Imports map[string]map[string]Extern
 
 // Extern is a runtime object supplied for a module import.
 //
-// HostFunc is currently the only supported Extern implementation. This
-// interface is present so Imports can grow to memory, table, or global imports
-// later without changing its shape.
+// HostFunc and *Memory are the currently supported Extern implementations.
 type Extern interface {
 	isExtern()
 }
@@ -121,6 +120,19 @@ func (HostFunc) isExtern() {}
 // used to instantiate a module; otherwise Instantiate returns an error.
 func NewHostFunc(params, results []wasmir.ValueType, fn func(ctx *Context, args []Value) ([]Value, error)) HostFunc {
 	return HostFunc{Params: params, Results: results, Func: fn}
+}
+
+// Memory is an instantiated WebAssembly linear memory exposed for imports.
+type Memory struct {
+	mem *vm.Memory
+}
+
+// isExtern marks Memory as a valid import object.
+func (Memory) isExtern() {}
+
+// Size returns the current memory size in WebAssembly pages.
+func (m *Memory) Size() uint64 {
+	return m.mem.Size()
 }
 
 // Context is passed to host functions during a WebAssembly call.
@@ -168,10 +180,12 @@ func (rt *Runtime) Instantiate(m *wasmir.Module, imports Imports) (*ModuleInstan
 	}
 
 	inst := &ModuleInstance{
-		rt:      rt,
-		hosts:   hosts,
-		exports: make(map[string]*Func),
-		globals: make(map[string]*Global),
+		rt:       rt,
+		hosts:    hosts,
+		exports:  make(map[string]*Func),
+		globals:  make(map[string]*Global),
+		memories: make(map[string]*Memory),
+		imports:  imports,
 	}
 	vmInst, err := vm.Instantiate(m, vmResolver{inst: inst})
 	if err != nil {
@@ -191,6 +205,12 @@ func (rt *Runtime) Instantiate(m *wasmir.Module, imports Imports) (*ModuleInstan
 				return nil, fmt.Errorf("export %q: global index %d out of range", exp.Name, exp.Index)
 			}
 			inst.globals[exp.Name] = &Global{inst: inst, index: exp.Index}
+		case wasmir.ExternalKindMemory:
+			mem, err := inst.vm.Memory(exp.Index)
+			if err != nil {
+				return nil, fmt.Errorf("export %q: memory index %d out of range", exp.Name, exp.Index)
+			}
+			inst.memories[exp.Name] = &Memory{mem: mem}
 		}
 	}
 	return inst, nil
@@ -202,11 +222,13 @@ func (rt *Runtime) Instantiate(m *wasmir.Module, imports Imports) (*ModuleInstan
 // exported functions. Values returned by ExportedFunc are bound to this
 // instance.
 type ModuleInstance struct {
-	rt      *Runtime
-	vm      *vm.Instance
-	hosts   []HostFunc
-	exports map[string]*Func
-	globals map[string]*Global
+	rt       *Runtime
+	vm       *vm.Instance
+	hosts    []HostFunc
+	exports  map[string]*Func
+	globals  map[string]*Global
+	memories map[string]*Memory
+	imports  Imports
 }
 
 // ExportedFunc returns the exported function with the given name.
@@ -227,6 +249,16 @@ func (inst *ModuleInstance) ExportedFunc(name string) (*Func, bool) {
 func (inst *ModuleInstance) ExportedGlobal(name string) (*Global, bool) {
 	g, ok := inst.globals[name]
 	return g, ok
+}
+
+// ExportedMemory returns the exported memory with the given name.
+//
+// The returned boolean is false when name is not exported as a memory. The
+// returned Memory is bound to this ModuleInstance and can be supplied as an
+// import to another instantiation.
+func (inst *ModuleInstance) ExportedMemory(name string) (*Memory, bool) {
+	m, ok := inst.memories[name]
+	return m, ok
 }
 
 // Global is a readable WebAssembly global exported from a ModuleInstance.
@@ -266,7 +298,7 @@ func buildHostFuncs(m *wasmir.Module, imports Imports) ([]HostFunc, error) {
 	var hosts []HostFunc
 	for _, imp := range m.Imports {
 		if imp.Kind != wasmir.ExternalKindFunction {
-			return nil, fmt.Errorf("unsupported import %q.%q kind %d", imp.Module, imp.Name, imp.Kind)
+			continue
 		}
 		host, err := resolveHostFunc(imports, imp)
 		if err != nil {
@@ -278,6 +310,29 @@ func buildHostFuncs(m *wasmir.Module, imports Imports) ([]HostFunc, error) {
 		hosts = append(hosts, host)
 	}
 	return hosts, nil
+}
+
+// resolveMemoryImport finds the host memory supplied for a memory import.
+func resolveMemoryImport(imports Imports, def wasmir.Memory) (*Memory, error) {
+	fields, ok := imports[def.ImportModule]
+	if !ok {
+		return nil, fmt.Errorf("missing import module %q", def.ImportModule)
+	}
+	ext, ok := fields[def.ImportName]
+	if !ok {
+		return nil, fmt.Errorf("missing import %q.%q", def.ImportModule, def.ImportName)
+	}
+	switch mem := ext.(type) {
+	case Memory:
+		return &mem, nil
+	case *Memory:
+		if mem == nil {
+			return nil, fmt.Errorf("import %q.%q is nil", def.ImportModule, def.ImportName)
+		}
+		return mem, nil
+	default:
+		return nil, fmt.Errorf("import %q.%q is not a memory", def.ImportModule, def.ImportName)
+	}
 }
 
 // resolveHostFunc finds the Go callback supplied for a function import.
@@ -329,4 +384,13 @@ func (r vmResolver) CallFunc(index uint32, args []vm.Value) ([]vm.Value, error) 
 		return nil, fmt.Errorf("host function index %d out of range", index)
 	}
 	return r.inst.hosts[index].Func(&Context{Runtime: r.inst.rt, Instance: r.inst}, args)
+}
+
+// Memory resolves an imported memory for the internal VM.
+func (r vmResolver) Memory(index uint32, def wasmir.Memory) (*vm.Memory, error) {
+	mem, err := resolveMemoryImport(r.inst.imports, def)
+	if err != nil {
+		return nil, err
+	}
+	return mem.mem, nil
 }

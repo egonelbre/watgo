@@ -2838,6 +2838,59 @@ func TestMemorySizeAndGrow(t *testing.T) {
 	}
 }
 
+// TestMemoryImportSharesExportedMemory checks that a memory exported from one
+// instance can be imported into another instance and remains shared.
+func TestMemoryImportSharesExportedMemory(t *testing.T) {
+	rt := wasmvm.NewRuntime()
+	exporter, err := rt.Instantiate(parseWAT(t, `
+		(module
+			(memory (export "memory") 1)
+			(func (export "grow") (result i32)
+				i32.const 1
+				memory.grow))
+	`), nil)
+	if err != nil {
+		t.Fatalf("Instantiate exporter failed: %v", err)
+	}
+	mem, ok := exporter.ExportedMemory("memory")
+	if !ok {
+		t.Fatal("missing memory export")
+	}
+
+	results := callExport(t, exporter, "grow")
+	if len(results) != 1 || results[0] != wasmvm.I32(1) {
+		t.Fatalf("exporter grow got results %#v, want old size i32 1", results)
+	}
+	if got, want := mem.Size(), uint64(2); got != want {
+		t.Fatalf("exported memory size = %d, want %d", got, want)
+	}
+
+	importer, err := rt.Instantiate(parseWAT(t, `
+		(module
+			(import "env" "memory" (memory 2))
+			(func (export "size") (result i32)
+				memory.size)
+			(func (export "grow") (result i32)
+				i32.const 1
+				memory.grow))
+	`), wasmvm.Imports{"env": {"memory": mem}})
+	if err != nil {
+		t.Fatalf("Instantiate importer failed: %v", err)
+	}
+
+	results = callExport(t, importer, "size")
+	if len(results) != 1 || results[0] != wasmvm.I32(2) {
+		t.Fatalf("importer size got results %#v, want i32 2", results)
+	}
+	results = callExport(t, importer, "grow")
+	if len(results) != 1 || results[0] != wasmvm.I32(2) {
+		t.Fatalf("importer grow got results %#v, want old size i32 2", results)
+	}
+	if got, want := mem.Size(), uint64(3); got != want {
+		t.Fatalf("shared memory size = %d, want %d", got, want)
+	}
+}
+
 // TestMemoryCopyAndFill checks the bulk memory instructions that move or
 // initialize byte ranges inside an instantiated memory.
 func TestMemoryCopyAndFill(t *testing.T) {

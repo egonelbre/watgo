@@ -53,9 +53,6 @@ var wasmSpecWasmvmDeniedScripts = []string{
 	"scripts/instance.wast",
 	"scripts/linking.wast",
 	"scripts/loop.wast",
-	"scripts/memory.wast",
-	"scripts/memory_grow.wast",
-	"scripts/memory_trap.wast",
 	"scripts/ref_func.wast",
 	"scripts/return_call.wast",
 	"scripts/return_call_indirect.wast",
@@ -278,6 +275,14 @@ func (r *wasmSpecWasmvmRunner) runCommand(res *commandResult, cmd scriptCommand,
 
 // runModule compiles and instantiates a top-level module command.
 func (r *wasmSpecWasmvmRunner) runModule(res *commandResult, cmd scriptCommand) {
+	if isModuleDefinitionExpr(cmd.moduleExpr) {
+		r.current = nil
+		r.currentMeta = nil
+		r.currentRuntimeName = cmd.moduleName
+		res.status = true
+		return
+	}
+
 	m, meta, err := compileWasmSpecCommandForWasmvm(cmd)
 	if err != nil {
 		res.status = false
@@ -301,6 +306,7 @@ func (r *wasmSpecWasmvmRunner) runModule(res *commandResult, cmd scriptCommand) 
 	if cmd.moduleName != "" {
 		r.moduleAlias[cmd.moduleName] = runtimeName
 	}
+	r.bindMemoryExports(runtimeName, inst, m)
 	res.status = true
 }
 
@@ -325,6 +331,7 @@ func (r *wasmSpecWasmvmRunner) runRegister(res *commandResult, cmd scriptCommand
 	r.instances[cmd.registerName] = inst
 	r.moduleMeta[cmd.registerName] = meta
 	r.moduleAlias[cmd.registerName] = cmd.registerName
+	r.copyRegisteredImports(cmd.registerName, sourceName)
 	if cmd.registerFrom != "" {
 		r.moduleAlias[cmd.registerFrom] = cmd.registerName
 	}
@@ -334,6 +341,39 @@ func (r *wasmSpecWasmvmRunner) runRegister(res *commandResult, cmd scriptCommand
 		r.currentRuntimeName = cmd.registerName
 	}
 	res.status = true
+}
+
+// bindMemoryExports exposes memory exports under runtimeName for later memory
+// imports in the same spec script.
+func (r *wasmSpecWasmvmRunner) bindMemoryExports(runtimeName string, inst *wasmvm.ModuleInstance, m *wasmir.Module) {
+	for _, exp := range m.Exports {
+		if exp.Kind != wasmir.ExternalKindMemory {
+			continue
+		}
+		mem, ok := inst.ExportedMemory(exp.Name)
+		if !ok {
+			continue
+		}
+		if r.imports[runtimeName] == nil {
+			r.imports[runtimeName] = map[string]wasmvm.Extern{}
+		}
+		r.imports[runtimeName][exp.Name] = mem
+	}
+}
+
+// copyRegisteredImports aliases importable exports when a spec register
+// command gives a module a new import module name.
+func (r *wasmSpecWasmvmRunner) copyRegisteredImports(registerName string, sourceName string) {
+	fields := r.imports[sourceName]
+	if len(fields) == 0 {
+		return
+	}
+	if r.imports[registerName] == nil {
+		r.imports[registerName] = map[string]wasmvm.Extern{}
+	}
+	for name, ext := range fields {
+		r.imports[registerName][name] = ext
+	}
 }
 
 // runInvoke invokes an exported function and requires the call to succeed.

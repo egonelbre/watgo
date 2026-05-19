@@ -9,14 +9,20 @@ import (
 	"github.com/eliben/watgo/wasmir"
 )
 
-const wasmPageSize = 64 * 1024
+const (
+	wasmPageSize = 64 * 1024
+
+	// maxWasm32MemoryPages is the architectural wasm32 memory limit. A memory
+	// without an explicit max is still bounded by the 32-bit address space.
+	maxWasm32MemoryPages = 65536
+)
 
 // Instance is the VM-owned execution state for one instantiated module.
 type Instance struct {
 	m        *wasmir.Module
 	funcs    []funcInst
 	globals  []globalInst
-	memories []memoryInst
+	memories []*Memory
 	tables   []tableInst
 	data     []dataInst
 	elems    []elemInst
@@ -50,9 +56,8 @@ type globalInst struct {
 	value Value
 }
 
-// memoryInst is one instantiated linear memory in the module's memory index
-// space.
-type memoryInst struct {
+// Memory is one instantiated linear memory in the module's memory index space.
+type Memory struct {
 	// addressType is the validated address type for this memory. It controls
 	// whether memory instructions consume i32 or i64 address operands.
 	addressType wasmir.ValueType
@@ -63,6 +68,32 @@ type memoryInst struct {
 	// data is the mutable linear-memory byte buffer. Its length is always a
 	// whole number of WebAssembly pages.
 	data []byte
+}
+
+// NewMemory creates a VM memory instance for the validated memory definition m.
+func NewMemory(m wasmir.Memory) (*Memory, error) {
+	if m.AddressType != wasmir.ValueTypeI32 && m.AddressType != wasmir.ValueTypeI64 {
+		return nil, fmt.Errorf("unsupported address type %s", m.AddressType)
+	}
+	if m.Min > uint64(int(^uint(0)>>1))/wasmPageSize {
+		return nil, fmt.Errorf("minimum size is too large")
+	}
+	size := int(m.Min * wasmPageSize)
+	return &Memory{
+		addressType: m.AddressType,
+		max:         m.Max,
+		data:        make([]byte, size),
+	}, nil
+}
+
+// AddressType returns the index operand type used by memory instructions.
+func (mem *Memory) AddressType() wasmir.ValueType {
+	return mem.addressType
+}
+
+// Size returns the current memory size in WebAssembly pages.
+func (mem *Memory) Size() uint64 {
+	return uint64(len(mem.data) / wasmPageSize)
 }
 
 // tableInst is one instantiated table in the module's table index space.
@@ -212,7 +243,7 @@ func (inst *Instance) funcType(typeIdx uint32) (wasmir.TypeDef, error) {
 func (inst *Instance) buildFuncs() error {
 	for _, imp := range inst.m.Imports {
 		if imp.Kind != wasmir.ExternalKindFunction {
-			return fmt.Errorf("unsupported import %q.%q kind %d", imp.Module, imp.Name, imp.Kind)
+			continue
 		}
 		if _, err := inst.funcType(imp.TypeIdx); err != nil {
 			return fmt.Errorf("import %q.%q has invalid function type: %w", imp.Module, imp.Name, err)
@@ -252,20 +283,41 @@ func (inst *Instance) buildGlobals() error {
 func (inst *Instance) buildMemories() error {
 	for i, m := range inst.m.Memories {
 		if m.ImportModule != "" || m.ImportName != "" {
-			return fmt.Errorf("unsupported memory import %q.%q", m.ImportModule, m.ImportName)
+			if inst.resolver == nil {
+				return fmt.Errorf("resolver is nil")
+			}
+			mem, err := inst.resolver.Memory(uint32(i), m)
+			if err != nil {
+				return fmt.Errorf("memory[%d]: %w", i, err)
+			}
+			if err := checkImportedMemory(m, mem); err != nil {
+				return fmt.Errorf("memory[%d]: %w", i, err)
+			}
+			inst.memories = append(inst.memories, mem)
+			continue
 		}
-		if m.AddressType != wasmir.ValueTypeI32 && m.AddressType != wasmir.ValueTypeI64 {
-			return fmt.Errorf("memory[%d]: unsupported address type %s", i, m.AddressType)
+		mem, err := NewMemory(m)
+		if err != nil {
+			return fmt.Errorf("memory[%d]: %w", i, err)
 		}
-		if m.Min > uint64(int(^uint(0)>>1))/wasmPageSize {
-			return fmt.Errorf("memory[%d]: minimum size is too large", i)
-		}
-		size := int(m.Min * wasmPageSize)
-		inst.memories = append(inst.memories, memoryInst{
-			addressType: m.AddressType,
-			max:         m.Max,
-			data:        make([]byte, size),
-		})
+		inst.memories = append(inst.memories, mem)
+	}
+	return nil
+}
+
+// checkImportedMemory verifies that mem satisfies the imported memory type.
+func checkImportedMemory(def wasmir.Memory, mem *Memory) error {
+	if mem == nil {
+		return fmt.Errorf("import resolved to nil memory")
+	}
+	if mem.addressType != def.AddressType {
+		return fmt.Errorf("address type mismatch: got %s, want %s", mem.addressType, def.AddressType)
+	}
+	if mem.Size() < def.Min {
+		return fmt.Errorf("minimum size mismatch: got %d pages, want at least %d", mem.Size(), def.Min)
+	}
+	if def.Max != nil && mem.maxPages() > *def.Max {
+		return fmt.Errorf("maximum size mismatch: got %d pages, want at most %d", mem.maxPages(), *def.Max)
 	}
 	return nil
 }
@@ -676,7 +728,7 @@ func (inst *Instance) memoryGrow(index uint32, delta uint64) (uint64, bool, erro
 		return oldPages, false, nil
 	}
 	newPages := oldPages + delta
-	if mem.max != nil && newPages > *mem.max {
+	if newPages > mem.maxPages() {
 		return oldPages, false, nil
 	}
 	if newPages > uint64(int(^uint(0)>>1))/wasmPageSize {
@@ -685,6 +737,17 @@ func (inst *Instance) memoryGrow(index uint32, delta uint64) (uint64, bool, erro
 	newSize := int(newPages * wasmPageSize)
 	mem.data = append(mem.data, make([]byte, newSize-len(mem.data))...)
 	return oldPages, true, nil
+}
+
+// maxPages returns the effective WebAssembly page limit for mem.
+func (mem *Memory) maxPages() uint64 {
+	if mem.max != nil {
+		return *mem.max
+	}
+	if mem.addressType == wasmir.ValueTypeI32 {
+		return maxWasm32MemoryPages
+	}
+	return uint64(int(^uint(0)>>1)) / wasmPageSize
 }
 
 // memoryCopy copies bytes between instantiated memories.
@@ -891,12 +954,17 @@ func (inst *Instance) elemSegment(index uint32) (*elemInst, error) {
 	return &inst.elems[index], nil
 }
 
-// memoryInst resolves a memory index to the mutable instantiated memory state.
-func (inst *Instance) memoryInst(index uint32) (*memoryInst, error) {
+// Memory returns the instantiated memory at index.
+func (inst *Instance) Memory(index uint32) (*Memory, error) {
 	if int(index) >= len(inst.memories) {
 		return nil, fmt.Errorf("memory index %d out of range", index)
 	}
-	return &inst.memories[index], nil
+	return inst.memories[index], nil
+}
+
+// memoryInst resolves a memory index to the mutable instantiated memory state.
+func (inst *Instance) memoryInst(index uint32) (*Memory, error) {
+	return inst.Memory(index)
 }
 
 // memoryAddressType returns the address operand type of the indexed memory.

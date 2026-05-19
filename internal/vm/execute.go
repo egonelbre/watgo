@@ -122,11 +122,14 @@ type Reference struct {
 	ExternID uint64
 }
 
-// Resolver is the VM's narrow bridge to host-owned function imports.
+// Resolver is the VM's narrow bridge to host-owned imports.
 type Resolver interface {
 	// CallFunc invokes an imported host function at index with already checked
 	// arguments in parameter order.
 	CallFunc(index uint32, args []Value) ([]Value, error)
+
+	// Memory resolves an imported memory in the module's memory index space.
+	Memory(index uint32, def wasmir.Memory) (*Memory, error)
 }
 
 // checkArgs verifies call argument count and value types.
