@@ -13,13 +13,6 @@ import (
 	"github.com/eliben/watgo/wasmvm"
 )
 
-// wabtWasmvmUnsupportedFixtures lists WABT fixtures the wasmvm backend still
-// does not support.
-var wabtWasmvmUnsupportedFixtures = []string{
-	// The SIMD fixture group requires v128 values and SIMD instructions.
-	"simd-binary.txt",
-}
-
 type wabtWasmvmImportBinding struct {
 	// imported is the original WABT-visible import metadata used for signature
 	// construction and stdout formatting.
@@ -36,25 +29,9 @@ type wabtWasmvmImportBinding struct {
 func wabtWasmvmBackend(t *testing.T) wabtBackend {
 	return wabtBackend{
 		name:     "wasmvm",
-		fixtures: wabtWasmvmFixtures(t),
+		fixtures: discoverWABTFixtures(t),
 		run:      runWABTWasmvmFixture,
 	}
-}
-
-// wabtWasmvmFixtures returns all discovered WABT fixtures except the ones
-// currently denied for the wasmvm backend.
-func wabtWasmvmFixtures(t *testing.T) []string {
-	t.Helper()
-
-	files := discoverWABTFixtures(t)
-	out := make([]string, 0, len(files))
-	for _, file := range files {
-		if slices.Contains(wabtWasmvmUnsupportedFixtures, file) {
-			continue
-		}
-		out = append(out, file)
-	}
-	return out
 }
 
 // runWABTWasmvmFixture executes one compiled fixture through wasmvm.

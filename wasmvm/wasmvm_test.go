@@ -2451,6 +2451,68 @@ func TestV128Unary(t *testing.T) {
 	}
 }
 
+// TestV128Binary checks SIMD binary arithmetic, bitwise ops, and swizzle.
+func TestV128Binary(t *testing.T) {
+	rt := wasmvm.NewRuntime()
+	inst, err := rt.Instantiate(parseWAT(t, `
+		(module
+			(func (export "i8_add") (result v128)
+				v128.const i32x4 0x00ff0001 0x04000002 0x00000003 0x00000004
+				v128.const i32x4 0x00020001 0xfe000002 0x00000003 0x00000004
+				i8x16.add)
+			(func (export "i16_mul") (result v128)
+				v128.const i32x4 0x00ff0001 0x00040002 0x00000003 0x00000004
+				v128.const i32x4 0x00020001 0x00fe0002 0x00000003 0x00000004
+				i16x8.mul)
+			(func (export "i64_mul") (result v128)
+				v128.const i32x4 0x00ff0001 0x00040002 0x00000003 0x00000004
+				v128.const i32x4 0x00020001 0x00fe0002 0x00000003 0x00000004
+				i64x2.mul)
+			(func (export "i8_add_sat_s") (result v128)
+				v128.const i32x4 0x00000001 0x0000007f 0x00000003 0x00000080
+				v128.const i32x4 0x00000001 0x00000002 0x00000003 0x000000ff
+				i8x16.add_sat_s)
+			(func (export "i16_sub_sat_u") (result v128)
+				v128.const i32x4 0x00ffffff 0x0400ffff 0x00000003 0x00000004
+				v128.const i32x4 0x00020001 0xfe000002 0x00000003 0x00000004
+				i16x8.sub_sat_u)
+			(func (export "vxor") (result v128)
+				v128.const i32x4 0x00ff0001 0x00040002 0x44000003 0x00000004
+				v128.const i32x4 0x00020001 0x00fe0002 0x00000003 0x55000004
+				v128.xor)
+			(func (export "f32_min") (result v128)
+				v128.const i32x4 0x80000000 0xffc00000 0x449a5000 0xbf800000
+				v128.const i32x4 0x00000000 0x3f800000 0x449a5000 0x3f800000
+				f32x4.min)
+			(func (export "f32_div") (result v128)
+				v128.const i32x4 0x80000000 0xffc00000 0x3fc00000 0xc0400000
+				v128.const i32x4 0x00000000 0x3f800000 0x3f800000 0x3fc00000
+				f32x4.div)
+			(func (export "f64_add") (result v128)
+				v128.const i32x4 0x00000000 0x3ff80000 0x00000000 0xfff80000
+				v128.const i32x4 0x00000000 0xc0934a00 0x00000000 0x3ff00000
+				f64x2.add)
+			(func (export "swizzle") (result v128)
+				v128.const i32x4 0x04030201 0x08070605 0x0c0b0a09 0x100f0e0d
+				v128.const i8x16 0 4 8 12 5 9 13 1 10 14 6 2 15 3 7 11
+				i8x16.swizzle))
+	`), nil)
+	if err != nil {
+		t.Fatalf("Instantiate failed: %v", err)
+	}
+
+	checkV128Export(t, inst, "i8_add", v128I32x4(0x00010002, 0x02000004, 0x00000006, 0x00000008))
+	checkV128Export(t, inst, "i16_mul", v128I32x4(0x01fe0001, 0x03f80004, 0x00000009, 0x00000010))
+	checkV128Export(t, inst, "i64_mul", v128I32x4(0x01010001, 0x03040202, 0x00000009, 0x00000018))
+	checkV128Export(t, inst, "i8_add_sat_s", v128I32x4(0x00000002, 0x0000007f, 0x00000006, 0x00000080))
+	checkV128Export(t, inst, "i16_sub_sat_u", v128I32x4(0x00fdfffe, 0x0000fffd, 0x00000000, 0x00000000))
+	checkV128Export(t, inst, "vxor", v128I32x4(0x00fd0000, 0x00fa0000, 0x44000000, 0x55000000))
+	checkV128Export(t, inst, "f32_min", v128I32x4(0x80000000, 0x7fc00000, 0x449a5000, 0xbf800000))
+	checkV128Export(t, inst, "f32_div", v128I32x4(0x7fc00000, 0x7fc00000, 0x3fc00000, 0xc0000000))
+	checkV128Export(t, inst, "f64_add", v128I32x4(0x00000000, 0xc0934400, 0x00000000, 0x7ff80000))
+	checkV128Export(t, inst, "swizzle", v128I32x4(0x0d090501, 0x020e0a06, 0x03070f0b, 0x0c080410))
+}
+
 // v128I32x4 builds the byte representation of a v128 value from i32 lanes.
 func v128I32x4(l0, l1, l2, l3 uint32) [16]byte {
 	return [16]byte{
