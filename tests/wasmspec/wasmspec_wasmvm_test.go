@@ -40,7 +40,6 @@ var wasmSpecWasmvmDeniedScripts = []string{
 	"scripts/br_table.wast",
 	"scripts/bulk-memory/bulk.wast",
 	"scripts/bulk-memory/table_copy.wast",
-	"scripts/bulk-memory/table_fill.wast",
 	"scripts/bulk-memory/table_init.wast",
 	"scripts/call.wast",
 	"scripts/call_indirect.wast",
@@ -53,17 +52,14 @@ var wasmSpecWasmvmDeniedScripts = []string{
 	"scripts/inline-module.wast",
 	"scripts/instance.wast",
 	"scripts/linking.wast",
-	"scripts/local_init.wast",
 	"scripts/loop.wast",
 	"scripts/memory.wast",
 	"scripts/memory_grow.wast",
 	"scripts/memory_trap.wast",
 	"scripts/ref_func.wast",
-	"scripts/ref_is_null.wast",
 	"scripts/return_call.wast",
 	"scripts/return_call_indirect.wast",
 	"scripts/return_call_ref.wast",
-	"scripts/select.wast",
 	"scripts/simd/simd_align.wast",
 	"scripts/simd/simd_const.wast",
 	"scripts/simd/simd_conversions.wast",
@@ -101,9 +97,7 @@ var wasmSpecWasmvmDeniedScripts = []string{
 	"scripts/skip-stack-guard-page.wast",
 	"scripts/switch.wast",
 	"scripts/table.wast",
-	"scripts/table_get.wast",
 	"scripts/table_grow.wast",
-	"scripts/table_set.wast",
 	"scripts/token.wast",
 	"scripts/type-equivalence.wast",
 	"scripts/type-rec.wast",
@@ -689,6 +683,10 @@ func scriptValueToWasmvmValue(arg scriptValue, targetType wasmir.ValueType) (was
 		return wasmvm.Value{Type: wasmir.ValueTypeV128, V128: arg.v128}, nil
 	case valueRefNull:
 		return wasmvm.Value{Type: targetType}, nil
+	case valueRefExtern:
+		value := wasmvm.ExternRef(arg.bits)
+		value.Type = targetType
+		return value, nil
 	default:
 		return wasmvm.Value{}, fmt.Errorf("unsupported invoke arg kind %q", arg.kind)
 	}
@@ -725,6 +723,9 @@ func wasmvmValueToRuntimeValue(value wasmvm.Value) (runtimeValue, error) {
 	case wasmir.ValueKindRef:
 		if value.Ref.Kind == 0 {
 			return runtimeValue{}, nil
+		}
+		if value.Ref.Kind == wasmvm.RefKindExtern {
+			return runtimeValue{scalar: encodedRefExternTag | value.Ref.ExternID}, nil
 		}
 		return runtimeValue{scalar: 1}, nil
 	default:

@@ -22,6 +22,24 @@ import (
 // over constructing Value directly.
 type Value = vm.Value
 
+// Reference is one runtime reference value carried by a Value.
+type Reference = vm.Reference
+
+// RefKind classifies the reference payload carried by a runtime Value.
+type RefKind = vm.RefKind
+
+const (
+	// RefKindNull is the null reference.
+	RefKindNull = vm.RefKindNull
+
+	// RefKindFunc is a reference to a function in the instance function index
+	// space.
+	RefKindFunc = vm.RefKindFunc
+
+	// RefKindExtern is an opaque externref value supplied by the host.
+	RefKindExtern = vm.RefKindExtern
+)
+
 // I32 returns a runtime Value whose type is wasmir.ValueTypeI32 and whose
 // payload is v.
 func I32(v int32) Value {
@@ -44,6 +62,14 @@ func F32(v float32) Value {
 // payload is v.
 func F64(v float64) Value {
 	return Value{Type: wasmir.ValueTypeF64, F64: v}
+}
+
+// ExternRef returns a runtime Value carrying an opaque host externref identity.
+func ExternRef(id uint64) Value {
+	return Value{
+		Type: wasmir.RefTypeExtern(true),
+		Ref:  Reference{Kind: RefKindExtern, ExternID: id},
+	}
 }
 
 // Imports maps WebAssembly import module names and field names to host externs.

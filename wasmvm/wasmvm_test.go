@@ -672,6 +672,41 @@ func TestRefAsNonNullTrap(t *testing.T) {
 	}
 }
 
+// TestExternRefRoundTrip checks that externref values keep their opaque
+// identity through locals, tables, and function results.
+func TestExternRefRoundTrip(t *testing.T) {
+	rt := wasmvm.NewRuntime()
+	inst, err := rt.Instantiate(parseWAT(t, `
+		(module
+			(table 2 externref)
+			(func (export "store") (param externref)
+				i32.const 1
+				local.get 0
+				table.set)
+			(func (export "load") (result externref)
+				i32.const 1
+				table.get)
+			(func (export "is_null") (param externref) (result i32)
+				local.get 0
+				ref.is_null))
+	`), nil)
+	if err != nil {
+		t.Fatalf("Instantiate failed: %v", err)
+	}
+
+	ref := wasmvm.ExternRef(17)
+	results := callExport(t, inst, "is_null", ref)
+	if len(results) != 1 || results[0] != wasmvm.I32(0) {
+		t.Fatalf("is_null got results %#v, want i32 0", results)
+	}
+
+	callExport(t, inst, "store", ref)
+	results = callExport(t, inst, "load")
+	if len(results) != 1 || results[0] != ref {
+		t.Fatalf("load got results %#v, want externref %#v", results, ref)
+	}
+}
+
 // TestBrOnNull checks both br_on_null paths: a null reference branches and a
 // non-null reference falls through as a refined function reference.
 func TestBrOnNull(t *testing.T) {

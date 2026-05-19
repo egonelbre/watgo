@@ -104,6 +104,9 @@ const (
 	// RefKindFunc is a reference to a function in the instance function index
 	// space.
 	RefKindFunc
+
+	// RefKindExtern is an opaque externref value supplied by the host.
+	RefKindExtern
 )
 
 // Reference is one runtime reference value.
@@ -113,6 +116,10 @@ type Reference struct {
 
 	// FuncIndex is set when Kind is RefKindFunc.
 	FuncIndex uint32
+
+	// ExternID is set when Kind is RefKindExtern. The VM treats this as an
+	// opaque identity token and never interprets it.
+	ExternID uint64
 }
 
 // Resolver is the VM's narrow bridge to host-owned function imports.
@@ -1314,6 +1321,8 @@ func refsEqual(a Reference, b Reference) bool {
 		return true
 	case RefKindFunc:
 		return a.FuncIndex == b.FuncIndex
+	case RefKindExtern:
+		return a.ExternID == b.ExternID
 	default:
 		return false
 	}
