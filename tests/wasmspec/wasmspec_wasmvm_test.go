@@ -1,9 +1,9 @@
 package tests
 
 import (
+	"flag"
 	"fmt"
 	"math"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -16,7 +16,11 @@ import (
 	"github.com/eliben/watgo/wasmvm"
 )
 
-const wasmSpecWasmvmScriptsEnvVar = "WATGO_WASMSPEC_WASMVM_SCRIPTS"
+var wasmSpecWasmvmScriptsFlag = flag.String(
+	"wasmspec.wasmvm-scripts",
+	"",
+	"comma-separated wasmspec scripts to run through the wasmvm backend",
+)
 
 // wasmSpecWasmvmDeniedScripts lists spec scripts not currently run through the
 // wasmvm backend. Entries ending in "/" deny an entire directory subtree.
@@ -42,8 +46,6 @@ var wasmSpecWasmvmDeniedScripts = []string{
 	"scripts/call_indirect.wast",
 	"scripts/data.wast",
 	"scripts/elem.wast",
-	"scripts/f32.wast",
-	"scripts/f64.wast",
 	"scripts/fac.wast",
 	"scripts/func.wast",
 	"scripts/global.wast",
@@ -131,11 +133,11 @@ func wasmSpecWasmvmBackend(t *testing.T) wasmSpecBackend {
 }
 
 // wasmSpecWasmvmSelectedScripts returns the wasmvm script list, optionally
-// overridden by a comma-separated environment variable for coverage triage.
+// overridden by a comma-separated test flag for coverage triage.
 func wasmSpecWasmvmSelectedScripts(t *testing.T) []string {
 	t.Helper()
 
-	override := os.Getenv(wasmSpecWasmvmScriptsEnvVar)
+	override := strings.TrimSpace(*wasmSpecWasmvmScriptsFlag)
 	if override == "" {
 		return wasmSpecWasmvmDiscoveredScripts(t)
 	}

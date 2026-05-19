@@ -48,8 +48,12 @@ The Node backend is the broad compatibility backend and runs the full corpus.
 The `wasmvm` backend discovers the corpus too, then filters out a deny list for
 unsupported or partially implemented features.
 
-For local triage, `WATGO_WASMSPEC_WASMVM_SCRIPTS` can override the `wasmvm`
-script list with comma-separated `scripts/...` paths.
+For local triage, `-wasmspec.wasmvm-scripts` can override the `wasmvm` script
+list with comma-separated `scripts/...` paths:
+
+```bash
+go test ./tests/wasmspec -run TestWasmSpecScriptsWasmvm -count=1 -args -wasmspec.wasmvm-scripts=scripts/f32.wast
+```
 
 ### Node Runtime
 

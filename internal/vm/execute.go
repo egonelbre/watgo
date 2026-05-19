@@ -36,8 +36,8 @@ const (
 	two63Float    = 9223372036854775808.0
 	two64Float    = 18446744073709551616.0
 
-	// canonicalF32NaNBits/canonicalF64NaNBits are used by SIMD sqrt lanes
-	// when the operation produces a new NaN.
+	// canonicalF32NaNBits/canonicalF64NaNBits are the WebAssembly canonical
+	// NaN encodings used when a floating-point operation produces a new NaN.
 	canonicalF32NaNBits = 0x7fc00000
 	canonicalF64NaNBits = 0x7ff8000000000000
 )
@@ -1457,18 +1457,9 @@ func (e *executor) evalF32Binary(kind wasmir.InstrKind) (float32, error) {
 	}
 
 	switch kind {
-	case wasmir.InstrF32Add:
-		return lhs + rhs, nil
-	case wasmir.InstrF32Sub:
-		return lhs - rhs, nil
-	case wasmir.InstrF32Mul:
-		return lhs * rhs, nil
-	case wasmir.InstrF32Div:
-		return lhs / rhs, nil
-	case wasmir.InstrF32Min:
-		return float32(math.Min(float64(lhs), float64(rhs))), nil
-	case wasmir.InstrF32Max:
-		return float32(math.Max(float64(lhs), float64(rhs))), nil
+	case wasmir.InstrF32Add, wasmir.InstrF32Sub, wasmir.InstrF32Mul,
+		wasmir.InstrF32Div, wasmir.InstrF32Min, wasmir.InstrF32Max:
+		return math.Float32frombits(binaryF32(kind, lhs, rhs)), nil
 	case wasmir.InstrF32Copysign:
 		return math.Float32frombits((math.Float32bits(lhs) &^ (1 << 31)) | (math.Float32bits(rhs) & (1 << 31))), nil
 	default:
@@ -1573,18 +1564,9 @@ func (e *executor) evalF64Binary(kind wasmir.InstrKind) (float64, error) {
 	}
 
 	switch kind {
-	case wasmir.InstrF64Add:
-		return lhs + rhs, nil
-	case wasmir.InstrF64Sub:
-		return lhs - rhs, nil
-	case wasmir.InstrF64Mul:
-		return lhs * rhs, nil
-	case wasmir.InstrF64Div:
-		return lhs / rhs, nil
-	case wasmir.InstrF64Min:
-		return math.Min(lhs, rhs), nil
-	case wasmir.InstrF64Max:
-		return math.Max(lhs, rhs), nil
+	case wasmir.InstrF64Add, wasmir.InstrF64Sub, wasmir.InstrF64Mul,
+		wasmir.InstrF64Div, wasmir.InstrF64Min, wasmir.InstrF64Max:
+		return math.Float64frombits(binaryF64(kind, lhs, rhs)), nil
 	case wasmir.InstrF64Copysign:
 		return math.Float64frombits((math.Float64bits(lhs) &^ (1 << 63)) | (math.Float64bits(rhs) & (1 << 63))), nil
 	default:
@@ -2821,7 +2803,7 @@ func binaryF32(kind wasmir.InstrKind, a float32, b float32) uint32 {
 
 	var result float32
 	switch kind {
-	case wasmir.InstrF32x4Min:
+	case wasmir.InstrF32Min, wasmir.InstrF32x4Min:
 		if a == 0 && b == 0 && (math.Signbit(float64(a)) || math.Signbit(float64(b))) {
 			return 0x80000000
 		}
@@ -2830,7 +2812,7 @@ func binaryF32(kind wasmir.InstrKind, a float32, b float32) uint32 {
 		} else {
 			result = b
 		}
-	case wasmir.InstrF32x4Max:
+	case wasmir.InstrF32Max, wasmir.InstrF32x4Max:
 		if a == 0 && b == 0 && (!math.Signbit(float64(a)) || !math.Signbit(float64(b))) {
 			return 0
 		}
@@ -2839,13 +2821,13 @@ func binaryF32(kind wasmir.InstrKind, a float32, b float32) uint32 {
 		} else {
 			result = b
 		}
-	case wasmir.InstrF32x4Add:
+	case wasmir.InstrF32Add, wasmir.InstrF32x4Add:
 		result = a + b
-	case wasmir.InstrF32x4Sub:
+	case wasmir.InstrF32Sub, wasmir.InstrF32x4Sub:
 		result = a - b
-	case wasmir.InstrF32x4Div:
+	case wasmir.InstrF32Div, wasmir.InstrF32x4Div:
 		result = a / b
-	case wasmir.InstrF32x4Mul:
+	case wasmir.InstrF32Mul, wasmir.InstrF32x4Mul:
 		result = a * b
 	}
 	if math.IsNaN(float64(result)) {
@@ -2862,7 +2844,7 @@ func binaryF64(kind wasmir.InstrKind, a float64, b float64) uint64 {
 
 	var result float64
 	switch kind {
-	case wasmir.InstrF64x2Min:
+	case wasmir.InstrF64Min, wasmir.InstrF64x2Min:
 		if a == 0 && b == 0 && (math.Signbit(a) || math.Signbit(b)) {
 			return 0x8000000000000000
 		}
@@ -2871,7 +2853,7 @@ func binaryF64(kind wasmir.InstrKind, a float64, b float64) uint64 {
 		} else {
 			result = b
 		}
-	case wasmir.InstrF64x2Max:
+	case wasmir.InstrF64Max, wasmir.InstrF64x2Max:
 		if a == 0 && b == 0 && (!math.Signbit(a) || !math.Signbit(b)) {
 			return 0
 		}
@@ -2880,13 +2862,13 @@ func binaryF64(kind wasmir.InstrKind, a float64, b float64) uint64 {
 		} else {
 			result = b
 		}
-	case wasmir.InstrF64x2Add:
+	case wasmir.InstrF64Add, wasmir.InstrF64x2Add:
 		result = a + b
-	case wasmir.InstrF64x2Sub:
+	case wasmir.InstrF64Sub, wasmir.InstrF64x2Sub:
 		result = a - b
-	case wasmir.InstrF64x2Div:
+	case wasmir.InstrF64Div, wasmir.InstrF64x2Div:
 		result = a / b
-	case wasmir.InstrF64x2Mul:
+	case wasmir.InstrF64Mul, wasmir.InstrF64x2Mul:
 		result = a * b
 	}
 	if math.IsNaN(result) {

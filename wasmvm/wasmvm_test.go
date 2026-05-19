@@ -1406,9 +1406,11 @@ func TestFloatBinaryExtraOps(t *testing.T) {
 			(func (export "f32_min") (param f32 f32) (result f32) local.get 0 local.get 1 f32.min)
 			(func (export "f32_max") (param f32 f32) (result f32) local.get 0 local.get 1 f32.max)
 			(func (export "f32_copysign") (param f32 f32) (result f32) local.get 0 local.get 1 f32.copysign)
+			(func (export "f32_sub_inf") (result f32) f32.const inf f32.const inf f32.sub)
 			(func (export "f64_min") (param f64 f64) (result f64) local.get 0 local.get 1 f64.min)
 			(func (export "f64_max") (param f64 f64) (result f64) local.get 0 local.get 1 f64.max)
-			(func (export "f64_copysign") (param f64 f64) (result f64) local.get 0 local.get 1 f64.copysign))
+			(func (export "f64_copysign") (param f64 f64) (result f64) local.get 0 local.get 1 f64.copysign)
+			(func (export "f64_div_inf") (result f64) f64.const inf f64.const inf f64.div))
 	`), nil)
 	if err != nil {
 		t.Fatalf("Instantiate failed: %v", err)
@@ -1431,6 +1433,45 @@ func TestFloatBinaryExtraOps(t *testing.T) {
 		if len(results) != 1 || results[0] != tt.want {
 			t.Fatalf("%s got results %#v, want %v", tt.name, results, tt.want)
 		}
+	}
+
+	const (
+		canonicalF32NaNBits = 0x7fc00000
+		canonicalF64NaNBits = 0x7ff8000000000000
+	)
+	for _, tt := range []struct {
+		name string
+		lhs  wasmvm.Value
+		rhs  wasmvm.Value
+		want uint64
+	}{
+		{name: "f32_min", lhs: wasmvm.F32(float32(math.Inf(-1))), rhs: wasmvm.F32(math.Float32frombits(canonicalF32NaNBits)), want: canonicalF32NaNBits},
+		{name: "f32_max", lhs: wasmvm.F32(float32(math.Inf(1))), rhs: wasmvm.F32(math.Float32frombits(canonicalF32NaNBits)), want: canonicalF32NaNBits},
+		{name: "f64_min", lhs: wasmvm.F64(math.Inf(-1)), rhs: wasmvm.F64(math.Float64frombits(canonicalF64NaNBits)), want: canonicalF64NaNBits},
+		{name: "f64_max", lhs: wasmvm.F64(math.Inf(1)), rhs: wasmvm.F64(math.Float64frombits(canonicalF64NaNBits)), want: canonicalF64NaNBits},
+	} {
+		results := callExport(t, inst, tt.name, tt.lhs, tt.rhs)
+		if len(results) != 1 {
+			t.Fatalf("%s got results %#v, want one result", tt.name, results)
+		}
+		var got uint64
+		if results[0].Type == wasmir.ValueTypeF32 {
+			got = uint64(math.Float32bits(results[0].F32))
+		} else {
+			got = math.Float64bits(results[0].F64)
+		}
+		if got != tt.want {
+			t.Fatalf("%s NaN bits = %#x, want %#x", tt.name, got, tt.want)
+		}
+	}
+
+	results := callExport(t, inst, "f32_sub_inf")
+	if len(results) != 1 || math.Float32bits(results[0].F32) != canonicalF32NaNBits {
+		t.Fatalf("f32_sub_inf got results %#v, want canonical NaN", results)
+	}
+	results = callExport(t, inst, "f64_div_inf")
+	if len(results) != 1 || math.Float64bits(results[0].F64) != canonicalF64NaNBits {
+		t.Fatalf("f64_div_inf got results %#v, want canonical NaN", results)
 	}
 }
 
