@@ -47,7 +47,6 @@ var wasmSpecWasmvmDeniedScripts = []string{
 	"scripts/f64.wast",
 	"scripts/fac.wast",
 	"scripts/func.wast",
-	"scripts/func_ptrs.wast",
 	"scripts/global.wast",
 	"scripts/imports.wast",
 	"scripts/inline-module.wast",
@@ -58,7 +57,6 @@ var wasmSpecWasmvmDeniedScripts = []string{
 	"scripts/memory.wast",
 	"scripts/memory_grow.wast",
 	"scripts/memory_trap.wast",
-	"scripts/names.wast",
 	"scripts/ref_func.wast",
 	"scripts/ref_is_null.wast",
 	"scripts/return_call.wast",
@@ -100,7 +98,6 @@ var wasmSpecWasmvmDeniedScripts = []string{
 	"scripts/simd/simd_store64_lane.wast",
 	"scripts/simd/simd_store8_lane.wast",
 	"scripts/skip-stack-guard-page.wast",
-	"scripts/start.wast",
 	"scripts/switch.wast",
 	"scripts/table.wast",
 	"scripts/table_get.wast",
@@ -114,6 +111,7 @@ var wasmSpecWasmvmDeniedScripts = []string{
 
 type wasmSpecWasmvmRunner struct {
 	rt                 *wasmvm.Runtime
+	imports            wasmvm.Imports
 	current            *wasmvm.ModuleInstance
 	currentMeta        *moduleMetadata
 	currentRuntimeName string
@@ -195,10 +193,35 @@ func wasmSpecWasmvmScriptDenied(scriptPath string) bool {
 func newWasmSpecWasmvmRunner() *wasmSpecWasmvmRunner {
 	return &wasmSpecWasmvmRunner{
 		rt:          wasmvm.NewRuntime(),
+		imports:     wasmSpecWasmvmSpectestImports(),
 		instances:   map[string]*wasmvm.ModuleInstance{},
 		moduleMeta:  map[string]*moduleMetadata{},
 		moduleAlias: map[string]string{},
 	}
+}
+
+// wasmSpecWasmvmSpectestImports returns the function imports exposed by the
+// spec harness's synthetic "spectest" module.
+func wasmSpecWasmvmSpectestImports() wasmvm.Imports {
+	return wasmvm.Imports{
+		"spectest": map[string]wasmvm.Extern{
+			"print":         wasmSpecWasmvmHostFunc(nil),
+			"print_i32":     wasmSpecWasmvmHostFunc([]wasmir.ValueType{wasmir.ValueTypeI32}),
+			"print_i64":     wasmSpecWasmvmHostFunc([]wasmir.ValueType{wasmir.ValueTypeI64}),
+			"print_f32":     wasmSpecWasmvmHostFunc([]wasmir.ValueType{wasmir.ValueTypeF32}),
+			"print_f64":     wasmSpecWasmvmHostFunc([]wasmir.ValueType{wasmir.ValueTypeF64}),
+			"print_i32_f32": wasmSpecWasmvmHostFunc([]wasmir.ValueType{wasmir.ValueTypeI32, wasmir.ValueTypeF32}),
+			"print_f64_f64": wasmSpecWasmvmHostFunc([]wasmir.ValueType{wasmir.ValueTypeF64, wasmir.ValueTypeF64}),
+		},
+	}
+}
+
+// wasmSpecWasmvmHostFunc returns a no-op host function with params and no
+// results.
+func wasmSpecWasmvmHostFunc(params []wasmir.ValueType) wasmvm.HostFunc {
+	return wasmvm.NewHostFunc(params, nil, func(ctx *wasmvm.Context, args []wasmvm.Value) ([]wasmvm.Value, error) {
+		return nil, nil
+	})
 }
 
 // runWasmSpecWasmvmScript executes parsed wasmspec commands through wasmvm.
@@ -267,7 +290,7 @@ func (r *wasmSpecWasmvmRunner) runModule(res *commandResult, cmd scriptCommand) 
 		return
 	}
 
-	inst, err := r.rt.Instantiate(m, nil)
+	inst, err := r.instantiate(m)
 	if err != nil {
 		res.status = false
 		res.detail = fmt.Sprintf("module instantiate failed: %v", err)
@@ -401,7 +424,7 @@ func (r *wasmSpecWasmvmRunner) runAssertExhaustion(res *commandResult, cmd scrip
 func (r *wasmSpecWasmvmRunner) runAssertUnlinkable(res *commandResult, cmd scriptCommand, opts runOptions) {
 	m, _, err := compileWasmSpecCommandForWasmvm(cmd)
 	if err == nil {
-		_, err = r.rt.Instantiate(m, nil)
+		_, err = r.instantiate(m)
 	}
 	if err == nil {
 		res.status = false
@@ -455,8 +478,14 @@ func (r *wasmSpecWasmvmRunner) instantiateTrapModule(cmd scriptCommand) error {
 	if err != nil {
 		return err
 	}
-	_, err = r.rt.Instantiate(m, nil)
+	_, err = r.instantiate(m)
 	return err
+}
+
+// instantiate instantiates m with the spec harness imports available to
+// wasmvm-backed scripts.
+func (r *wasmSpecWasmvmRunner) instantiate(m *wasmir.Module) (*wasmvm.ModuleInstance, error) {
+	return r.rt.Instantiate(m, r.imports)
 }
 
 // invoke calls one exported function through wasmvm and converts results to
