@@ -2375,6 +2375,82 @@ func TestV128Compare(t *testing.T) {
 	checkV128Export(t, inst, "f64_gt", v128I32x4(0x00000000, 0x00000000, 0xffffffff, 0xffffffff))
 }
 
+// TestV128Unary checks SIMD unary operations, tests, bitmasks, and conversions.
+func TestV128Unary(t *testing.T) {
+	rt := wasmvm.NewRuntime()
+	inst, err := rt.Instantiate(parseWAT(t, `
+		(module
+			(func (export "i8_neg") (result v128)
+				v128.const i32x4 0x00000001 0x00000002 0x00000003 0x00000004
+				i8x16.neg)
+			(func (export "i16_neg") (result v128)
+				v128.const i32x4 0x0000ffff 0x00007fff 0x00000003 0x00000004
+				i16x8.neg)
+			(func (export "i32_neg") (result v128)
+				v128.const i32x4 0x00000001 0x00000002 0x00000003 0x00000004
+				i32x4.neg)
+			(func (export "i64_neg") (result v128)
+				v128.const i32x4 0x00000001 0x00000002 0x00000003 0x00000004
+				i64x2.neg)
+			(func (export "vnot") (result v128)
+				v128.const i32x4 0x00ff0001 0x00550002 0x00000003 0x00000004
+				v128.not)
+			(func (export "any_true") (result i32)
+				v128.const i32x4 0x00ff0001 0x00550002 0x00000003 0x00000004
+				v128.any_true)
+			(func (export "all_true") (result i32)
+				v128.const i32x4 0x00040004 0x00030003 0x00020002 0x00010001
+				i16x8.all_true)
+			(func (export "bitmask") (result i32)
+				v128.const i32x4 0x80008000 0x80008000 0x80008000 0x80008000
+				i16x8.bitmask)
+			(func (export "f32_neg") (result v128)
+				v128.const i32x4 0x80000000 0xffc00000 0x449a5000 0xbf800000
+				f32x4.neg)
+			(func (export "f64_abs") (result v128)
+				v128.const i32x4 0x00000000 0xc0934a00 0x00000000 0x3ff00000
+				f64x2.abs)
+			(func (export "f32_sqrt") (result v128)
+				v128.const i32x4 0xbf800000 0xffc00000 0x40800000 0x41100000
+				f32x4.sqrt)
+			(func (export "convert_s") (result v128)
+				v128.const i32x4 0x00000001 0xffffffff 0x00000000 0x00000003
+				f32x4.convert_i32x4_s)
+			(func (export "trunc_sat_u") (result v128)
+				v128.const i32x4 0x3fc00000 0x40900000 0xffc00000 0x449a599a
+				i32x4.trunc_sat_f32x4_u))
+	`), nil)
+	if err != nil {
+		t.Fatalf("Instantiate failed: %v", err)
+	}
+
+	checkV128Export(t, inst, "i8_neg", v128I32x4(0x000000ff, 0x000000fe, 0x000000fd, 0x000000fc))
+	checkV128Export(t, inst, "i16_neg", v128I32x4(0x00000001, 0x00008001, 0x0000fffd, 0x0000fffc))
+	checkV128Export(t, inst, "i32_neg", v128I32x4(0xffffffff, 0xfffffffe, 0xfffffffd, 0xfffffffc))
+	checkV128Export(t, inst, "i64_neg", v128I32x4(0xffffffff, 0xfffffffd, 0xfffffffd, 0xfffffffb))
+	checkV128Export(t, inst, "vnot", v128I32x4(0xff00fffe, 0xffaafffd, 0xfffffffc, 0xfffffffb))
+	checkV128Export(t, inst, "f32_neg", v128I32x4(0x00000000, 0x7fc00000, 0xc49a5000, 0x3f800000))
+	checkV128Export(t, inst, "f64_abs", v128I32x4(0x00000000, 0x40934a00, 0x00000000, 0x3ff00000))
+	checkV128Export(t, inst, "f32_sqrt", v128I32x4(0x7fc00000, 0x7fc00000, 0x40000000, 0x40400000))
+	checkV128Export(t, inst, "convert_s", v128I32x4(0x3f800000, 0xbf800000, 0x00000000, 0x40400000))
+	checkV128Export(t, inst, "trunc_sat_u", v128I32x4(0x00000001, 0x00000004, 0x00000000, 0x000004d2))
+
+	scalarChecks := []struct {
+		name string
+		want wasmvm.Value
+	}{
+		{"any_true", wasmvm.I32(1)},
+		{"all_true", wasmvm.I32(1)},
+		{"bitmask", wasmvm.I32(255)},
+	}
+	for _, check := range scalarChecks {
+		results := callExport(t, inst, check.name)
+		if len(results) != 1 || results[0] != check.want {
+			t.Fatalf("%s got results %#v, want %#v", check.name, results, check.want)
+		}
+	}
+}
+
 // v128I32x4 builds the byte representation of a v128 value from i32 lanes.
 func v128I32x4(l0, l1, l2, l3 uint32) [16]byte {
 	return [16]byte{

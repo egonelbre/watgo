@@ -4255,6 +4255,7 @@ func (v *bodyValidator) validate() diag.ErrorList {
 			truncateStack(len(stack) - 2)
 			appendStackType(wasmir.ValueTypeV128)
 		case wasmir.InstrI16x8ExtaddPairwiseI8x16S, wasmir.InstrI16x8ExtaddPairwiseI8x16U,
+			wasmir.InstrI8x16Neg,
 			wasmir.InstrI16x8Abs, wasmir.InstrI16x8Neg,
 			wasmir.InstrI16x8ExtendLowI8x16S, wasmir.InstrI16x8ExtendLowI8x16U,
 			wasmir.InstrI32x4ExtendLowI16x8S, wasmir.InstrI32x4ExtendLowI16x8U,
@@ -4265,7 +4266,7 @@ func (v *bodyValidator) validate() diag.ErrorList {
 			wasmir.InstrF32x4ConvertI32x4S, wasmir.InstrF32x4ConvertI32x4U,
 			wasmir.InstrF64x2ConvertLowI32x4S, wasmir.InstrF64x2ConvertLowI32x4U,
 			wasmir.InstrF32x4DemoteF64x2Zero, wasmir.InstrF64x2PromoteLowF32x4,
-			wasmir.InstrI32x4Neg:
+			wasmir.InstrI32x4Neg, wasmir.InstrI64x2Neg:
 			name := instrName(ins.Kind)
 			if !ensureCurrentFrameOperands(1, int(hint.ExplicitInstrArgs), int(hint.BottomInstrArgs)) {
 				diags.Addf("%s: %s needs 1 operand", insCtx, name)

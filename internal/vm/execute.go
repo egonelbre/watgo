@@ -35,6 +35,11 @@ const (
 	minInt64Float = -9223372036854775808.0
 	two63Float    = 9223372036854775808.0
 	two64Float    = 18446744073709551616.0
+
+	// canonicalF32NaNBits/canonicalF64NaNBits are used by SIMD sqrt lanes
+	// when the operation produces a new NaN.
+	canonicalF32NaNBits = 0x7fc00000
+	canonicalF64NaNBits = 0x7ff8000000000000
 )
 
 // instructionError adds interpreter location to low-level execution errors.
@@ -804,6 +809,25 @@ func (e *executor) run() ([]Value, error) {
 			e.push(Value{Type: wasmir.ValueTypeV128, V128: value})
 		case wasmir.InstrI8x16Shuffle:
 			value, err := e.evalI8x16Shuffle(ins.index)
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			e.push(Value{Type: wasmir.ValueTypeV128, V128: value})
+		case wasmir.InstrV128AnyTrue,
+			wasmir.InstrI8x16AllTrue, wasmir.InstrI16x8AllTrue, wasmir.InstrI32x4AllTrue, wasmir.InstrI64x2AllTrue,
+			wasmir.InstrI8x16Bitmask, wasmir.InstrI16x8Bitmask, wasmir.InstrI32x4Bitmask, wasmir.InstrI64x2Bitmask:
+			value, err := e.evalV128Test(ins.kind)
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			e.push(Value{Type: wasmir.ValueTypeI32, I32: value})
+		case wasmir.InstrV128Not,
+			wasmir.InstrI8x16Neg, wasmir.InstrI16x8Neg, wasmir.InstrI32x4Neg, wasmir.InstrI64x2Neg,
+			wasmir.InstrF32x4Abs, wasmir.InstrF32x4Neg, wasmir.InstrF32x4Sqrt,
+			wasmir.InstrF64x2Abs, wasmir.InstrF64x2Neg, wasmir.InstrF64x2Sqrt,
+			wasmir.InstrF32x4ConvertI32x4S, wasmir.InstrF32x4ConvertI32x4U,
+			wasmir.InstrI32x4TruncSatF32x4S, wasmir.InstrI32x4TruncSatF32x4U:
+			value, err := e.evalV128Unary(ins.kind)
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
@@ -2234,6 +2258,69 @@ func (e *executor) evalV128Bitselect() ([16]byte, error) {
 	return out, nil
 }
 
+// evalV128Test evaluates a SIMD test instruction that returns an i32 result.
+func (e *executor) evalV128Test(kind wasmir.InstrKind) (int32, error) {
+	vec, err := e.popV128()
+	if err != nil {
+		return 0, err
+	}
+
+	switch kind {
+	case wasmir.InstrV128AnyTrue:
+		return boolI32(v128AnyTrue(vec)), nil
+	case wasmir.InstrI8x16AllTrue:
+		return boolI32(v128AllTrue(vec, 1)), nil
+	case wasmir.InstrI16x8AllTrue:
+		return boolI32(v128AllTrue(vec, 2)), nil
+	case wasmir.InstrI32x4AllTrue:
+		return boolI32(v128AllTrue(vec, 4)), nil
+	case wasmir.InstrI64x2AllTrue:
+		return boolI32(v128AllTrue(vec, 8)), nil
+	case wasmir.InstrI8x16Bitmask:
+		return int32(v128Bitmask(vec, 1)), nil
+	case wasmir.InstrI16x8Bitmask:
+		return int32(v128Bitmask(vec, 2)), nil
+	case wasmir.InstrI32x4Bitmask:
+		return int32(v128Bitmask(vec, 4)), nil
+	case wasmir.InstrI64x2Bitmask:
+		return int32(v128Bitmask(vec, 8)), nil
+	default:
+		return 0, fmt.Errorf("unsupported SIMD test instruction %s", instrName(kind))
+	}
+}
+
+// evalV128Unary evaluates one SIMD unary instruction that returns a v128
+// result.
+func (e *executor) evalV128Unary(kind wasmir.InstrKind) ([16]byte, error) {
+	vec, err := e.popV128()
+	if err != nil {
+		return [16]byte{}, err
+	}
+
+	switch kind {
+	case wasmir.InstrV128Not:
+		return notV128(vec), nil
+	case wasmir.InstrI8x16Neg:
+		return negI8x16(vec), nil
+	case wasmir.InstrI16x8Neg:
+		return negI16x8(vec), nil
+	case wasmir.InstrI32x4Neg:
+		return negI32x4(vec), nil
+	case wasmir.InstrI64x2Neg:
+		return negI64x2(vec), nil
+	case wasmir.InstrF32x4Abs, wasmir.InstrF32x4Neg, wasmir.InstrF32x4Sqrt:
+		return unaryF32x4(kind, vec), nil
+	case wasmir.InstrF64x2Abs, wasmir.InstrF64x2Neg, wasmir.InstrF64x2Sqrt:
+		return unaryF64x2(kind, vec), nil
+	case wasmir.InstrF32x4ConvertI32x4S, wasmir.InstrF32x4ConvertI32x4U:
+		return convertI32x4ToF32x4(kind, vec), nil
+	case wasmir.InstrI32x4TruncSatF32x4S, wasmir.InstrI32x4TruncSatF32x4U:
+		return truncSatF32x4ToI32x4(kind, vec), nil
+	default:
+		return [16]byte{}, fmt.Errorf("unsupported SIMD unary instruction %s", instrName(kind))
+	}
+}
+
 // evalV128Compare evaluates one SIMD comparison instruction.
 func (e *executor) evalV128Compare(kind wasmir.InstrKind) ([16]byte, error) {
 	rhs, err := e.popV128()
@@ -2335,6 +2422,193 @@ func shiftI64x2(kind wasmir.InstrKind, vec [16]byte, count uint32) [16]byte {
 		case wasmir.InstrI64x2ShrU:
 			binary.LittleEndian.PutUint64(out[i:i+8], raw>>count)
 		}
+	}
+	return out
+}
+
+// v128AnyTrue reports whether any byte in vec is non-zero.
+func v128AnyTrue(vec [16]byte) bool {
+	for _, b := range vec {
+		if b != 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// v128AllTrue reports whether every integer lane of width bytes is non-zero.
+func v128AllTrue(vec [16]byte, width int) bool {
+	for i := 0; i < len(vec); i += width {
+		switch width {
+		case 1:
+			if vec[i] == 0 {
+				return false
+			}
+		case 2:
+			if binary.LittleEndian.Uint16(vec[i:i+2]) == 0 {
+				return false
+			}
+		case 4:
+			if binary.LittleEndian.Uint32(vec[i:i+4]) == 0 {
+				return false
+			}
+		case 8:
+			if binary.LittleEndian.Uint64(vec[i:i+8]) == 0 {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// v128Bitmask extracts each lane's sign bit into an i32 bitmask.
+func v128Bitmask(vec [16]byte, width int) uint32 {
+	var mask uint32
+	for lane, i := 0, 0; i < len(vec); lane, i = lane+1, i+width {
+		var sign bool
+		switch width {
+		case 1:
+			sign = vec[i]&0x80 != 0
+		case 2:
+			sign = binary.LittleEndian.Uint16(vec[i:i+2])&0x8000 != 0
+		case 4:
+			sign = binary.LittleEndian.Uint32(vec[i:i+4])&0x80000000 != 0
+		case 8:
+			sign = binary.LittleEndian.Uint64(vec[i:i+8])&0x8000000000000000 != 0
+		}
+		if sign {
+			mask |= 1 << lane
+		}
+	}
+	return mask
+}
+
+// notV128 flips every bit in vec.
+func notV128(vec [16]byte) [16]byte {
+	var out [16]byte
+	for i, b := range vec {
+		out[i] = ^b
+	}
+	return out
+}
+
+// negI8x16 negates each i8 lane with wrapping arithmetic.
+func negI8x16(vec [16]byte) [16]byte {
+	var out [16]byte
+	for i, b := range vec {
+		out[i] = byte(0 - uint8(b))
+	}
+	return out
+}
+
+// negI16x8 negates each i16 lane with wrapping arithmetic.
+func negI16x8(vec [16]byte) [16]byte {
+	var out [16]byte
+	for i := 0; i < len(out); i += 2 {
+		raw := binary.LittleEndian.Uint16(vec[i : i+2])
+		binary.LittleEndian.PutUint16(out[i:i+2], 0-raw)
+	}
+	return out
+}
+
+// negI32x4 negates each i32 lane with wrapping arithmetic.
+func negI32x4(vec [16]byte) [16]byte {
+	var out [16]byte
+	for i := 0; i < len(out); i += 4 {
+		raw := binary.LittleEndian.Uint32(vec[i : i+4])
+		binary.LittleEndian.PutUint32(out[i:i+4], 0-raw)
+	}
+	return out
+}
+
+// negI64x2 negates each i64 lane with wrapping arithmetic.
+func negI64x2(vec [16]byte) [16]byte {
+	var out [16]byte
+	for i := 0; i < len(out); i += 8 {
+		raw := binary.LittleEndian.Uint64(vec[i : i+8])
+		binary.LittleEndian.PutUint64(out[i:i+8], 0-raw)
+	}
+	return out
+}
+
+// unaryF32x4 applies one f32x4 unary operation lane-wise.
+func unaryF32x4(kind wasmir.InstrKind, vec [16]byte) [16]byte {
+	var out [16]byte
+	for i := 0; i < len(out); i += 4 {
+		raw := binary.LittleEndian.Uint32(vec[i : i+4])
+		var result uint32
+		switch kind {
+		case wasmir.InstrF32x4Abs:
+			result = raw & 0x7fffffff
+		case wasmir.InstrF32x4Neg:
+			result = raw ^ 0x80000000
+		case wasmir.InstrF32x4Sqrt:
+			v := math.Float32frombits(raw)
+			if math.IsNaN(float64(v)) || v < 0 {
+				result = canonicalF32NaNBits
+			} else {
+				result = math.Float32bits(float32(math.Sqrt(float64(v))))
+			}
+		}
+		binary.LittleEndian.PutUint32(out[i:i+4], result)
+	}
+	return out
+}
+
+// unaryF64x2 applies one f64x2 unary operation lane-wise.
+func unaryF64x2(kind wasmir.InstrKind, vec [16]byte) [16]byte {
+	var out [16]byte
+	for i := 0; i < len(out); i += 8 {
+		raw := binary.LittleEndian.Uint64(vec[i : i+8])
+		var result uint64
+		switch kind {
+		case wasmir.InstrF64x2Abs:
+			result = raw & 0x7fffffffffffffff
+		case wasmir.InstrF64x2Neg:
+			result = raw ^ 0x8000000000000000
+		case wasmir.InstrF64x2Sqrt:
+			v := math.Float64frombits(raw)
+			if math.IsNaN(v) || v < 0 {
+				result = canonicalF64NaNBits
+			} else {
+				result = math.Float64bits(math.Sqrt(v))
+			}
+		}
+		binary.LittleEndian.PutUint64(out[i:i+8], result)
+	}
+	return out
+}
+
+// convertI32x4ToF32x4 converts each i32 lane to an f32 lane.
+func convertI32x4ToF32x4(kind wasmir.InstrKind, vec [16]byte) [16]byte {
+	var out [16]byte
+	for i := 0; i < len(out); i += 4 {
+		raw := binary.LittleEndian.Uint32(vec[i : i+4])
+		var result float32
+		switch kind {
+		case wasmir.InstrF32x4ConvertI32x4S:
+			result = float32(int32(raw))
+		case wasmir.InstrF32x4ConvertI32x4U:
+			result = float32(raw)
+		}
+		binary.LittleEndian.PutUint32(out[i:i+4], math.Float32bits(result))
+	}
+	return out
+}
+
+// truncSatF32x4ToI32x4 saturating-truncates each f32 lane to an i32 lane.
+func truncSatF32x4ToI32x4(kind wasmir.InstrKind, vec [16]byte) [16]byte {
+	var out [16]byte
+	for i := 0; i < len(out); i += 4 {
+		v := math.Float32frombits(binary.LittleEndian.Uint32(vec[i : i+4]))
+		var result int32
+		switch kind {
+		case wasmir.InstrI32x4TruncSatF32x4S:
+			result = truncSatFloatToI32S(float64(v))
+		case wasmir.InstrI32x4TruncSatF32x4U:
+			result = truncSatFloatToI32U(float64(v))
+		}
+		binary.LittleEndian.PutUint32(out[i:i+4], uint32(result))
 	}
 	return out
 }
