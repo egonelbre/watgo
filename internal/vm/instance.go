@@ -178,6 +178,11 @@ func (inst *Instance) CallFunc(index uint32, args []Value) ([]Value, error) {
 	return executeFunction(fn.code, ft, args, inst)
 }
 
+// GlobalValue returns the current value of the global at index.
+func (inst *Instance) GlobalValue(index uint32) (Value, error) {
+	return inst.globalGetValue(index)
+}
+
 // FuncType returns the signature of the function at index.
 func (inst *Instance) FuncType(index uint32) (wasmir.TypeDef, error) {
 	if int(index) >= len(inst.funcs) {

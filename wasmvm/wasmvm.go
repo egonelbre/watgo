@@ -145,6 +145,7 @@ func (rt *Runtime) Instantiate(m *wasmir.Module, imports Imports) (*ModuleInstan
 		rt:      rt,
 		hosts:   hosts,
 		exports: make(map[string]*Func),
+		globals: make(map[string]*Global),
 	}
 	vmInst, err := vm.Instantiate(m, vmResolver{inst: inst})
 	if err != nil {
@@ -153,13 +154,18 @@ func (rt *Runtime) Instantiate(m *wasmir.Module, imports Imports) (*ModuleInstan
 	inst.vm = vmInst
 
 	for _, exp := range m.Exports {
-		if exp.Kind != wasmir.ExternalKindFunction {
-			continue
+		switch exp.Kind {
+		case wasmir.ExternalKindFunction:
+			if _, err := inst.vm.FuncType(exp.Index); err != nil {
+				return nil, fmt.Errorf("export %q: function index %d out of range", exp.Name, exp.Index)
+			}
+			inst.exports[exp.Name] = &Func{inst: inst, index: exp.Index}
+		case wasmir.ExternalKindGlobal:
+			if _, err := inst.vm.GlobalValue(exp.Index); err != nil {
+				return nil, fmt.Errorf("export %q: global index %d out of range", exp.Name, exp.Index)
+			}
+			inst.globals[exp.Name] = &Global{inst: inst, index: exp.Index}
 		}
-		if _, err := inst.vm.FuncType(exp.Index); err != nil {
-			return nil, fmt.Errorf("export %q: function index %d out of range", exp.Name, exp.Index)
-		}
-		inst.exports[exp.Name] = &Func{inst: inst, index: exp.Index}
 	}
 	return inst, nil
 }
@@ -174,6 +180,7 @@ type ModuleInstance struct {
 	vm      *vm.Instance
 	hosts   []HostFunc
 	exports map[string]*Func
+	globals map[string]*Global
 }
 
 // ExportedFunc returns the exported function with the given name.
@@ -184,6 +191,27 @@ type ModuleInstance struct {
 func (inst *ModuleInstance) ExportedFunc(name string) (*Func, bool) {
 	f, ok := inst.exports[name]
 	return f, ok
+}
+
+// ExportedGlobal returns the exported global with the given name.
+//
+// The returned boolean is false when name is not exported as a global. The
+// returned Global is bound to this ModuleInstance and can be read with
+// Global.Value.
+func (inst *ModuleInstance) ExportedGlobal(name string) (*Global, bool) {
+	g, ok := inst.globals[name]
+	return g, ok
+}
+
+// Global is a readable WebAssembly global exported from a ModuleInstance.
+type Global struct {
+	inst  *ModuleInstance
+	index uint32
+}
+
+// Value returns the current value stored in g.
+func (g *Global) Value() (Value, error) {
+	return g.inst.vm.GlobalValue(g.index)
 }
 
 // Func is a callable WebAssembly function exported from a ModuleInstance.

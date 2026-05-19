@@ -1805,6 +1805,39 @@ func TestModuleGlobals(t *testing.T) {
 	}
 }
 
+func TestExportedGlobalValue(t *testing.T) {
+	// ExportedGlobal exposes the same global state that executing code observes
+	// through global.get/global.set.
+	rt := wasmvm.NewRuntime()
+	inst, err := rt.Instantiate(parseWAT(t, `
+		(module
+			(global $g (export "g") (mut i32) (i32.const 7))
+			(func (export "set_g") (param i32)
+				local.get 0
+				global.set $g))
+	`), nil)
+	if err != nil {
+		t.Fatalf("Instantiate failed: %v", err)
+	}
+
+	g, ok := inst.ExportedGlobal("g")
+	if !ok {
+		t.Fatal("missing g export")
+	}
+	if got, err := g.Value(); err != nil || got != wasmvm.I32(7) {
+		t.Fatalf("g.Value() = %#v, %v; want i32 7, nil", got, err)
+	}
+
+	callExport(t, inst, "set_g", wasmvm.I32(42))
+	if got, err := g.Value(); err != nil || got != wasmvm.I32(42) {
+		t.Fatalf("g.Value() after set = %#v, %v; want i32 42, nil", got, err)
+	}
+
+	if _, ok := inst.ExportedGlobal("missing"); ok {
+		t.Fatal("ExportedGlobal reported missing global as present")
+	}
+}
+
 func TestGlobalInitializerReadsEarlierImmutableGlobal(t *testing.T) {
 	// Global initializer expressions can read earlier immutable globals and use
 	// the numeric constant-expression operators currently supported by wasmvm.

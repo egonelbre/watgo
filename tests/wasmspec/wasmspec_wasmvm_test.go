@@ -42,7 +42,6 @@ var wasmSpecWasmvmDeniedScripts = []string{
 	"scripts/call_indirect.wast",
 	"scripts/data.wast",
 	"scripts/elem.wast",
-	"scripts/exports.wast",
 	"scripts/f32.wast",
 	"scripts/f64.wast",
 	"scripts/fac.wast",
@@ -355,8 +354,7 @@ func (r *wasmSpecWasmvmRunner) runInvoke(res *commandResult, cmd scriptCommand) 
 // values.
 func (r *wasmSpecWasmvmRunner) runAssertReturn(res *commandResult, cmd scriptCommand) {
 	if cmd.getAction != nil {
-		res.status = false
-		res.detail = "wasmvm backend does not support get assertions yet"
+		r.runAssertReturnGet(res, cmd)
 		return
 	}
 	results, err := r.invoke(cmd.action)
@@ -366,6 +364,31 @@ func (r *wasmSpecWasmvmRunner) runAssertReturn(res *commandResult, cmd scriptCom
 		return
 	}
 
+	if len(results) != len(cmd.expectValues) {
+		res.status = false
+		res.detail = fmt.Sprintf("result arity mismatch: got %d want %d", len(results), len(cmd.expectValues))
+		return
+	}
+	for i := range results {
+		want := cmd.expectValues[i]
+		if !runtimeValueMatchesExpected(results[i], want) {
+			res.status = false
+			res.detail = fmt.Sprintf("result[%d] mismatch: got %s want %s", i, formatGotValueLikeExpected(results[i], want), formatExpectedValue(want))
+			return
+		}
+	}
+	res.status = true
+}
+
+// runAssertReturnGet reads an exported global and compares it with the expected
+// value.
+func (r *wasmSpecWasmvmRunner) runAssertReturnGet(res *commandResult, cmd scriptCommand) {
+	results, err := r.get(cmd.getAction)
+	if err != nil {
+		res.status = false
+		res.detail = fmt.Sprintf("get action failed: %v", err)
+		return
+	}
 	if len(results) != len(cmd.expectValues) {
 		res.status = false
 		res.detail = fmt.Sprintf("result arity mismatch: got %d want %d", len(results), len(cmd.expectValues))
@@ -486,6 +509,34 @@ func (r *wasmSpecWasmvmRunner) instantiateTrapModule(cmd scriptCommand) error {
 // wasmvm-backed scripts.
 func (r *wasmSpecWasmvmRunner) instantiate(m *wasmir.Module) (*wasmvm.ModuleInstance, error) {
 	return r.rt.Instantiate(m, r.imports)
+}
+
+// get reads one exported global through wasmvm and converts it to the wasmspec
+// harness value representation.
+func (r *wasmSpecWasmvmRunner) get(action *getAction) ([]runtimeValue, error) {
+	if action == nil {
+		return nil, fmt.Errorf("nil get action")
+	}
+	inst, meta, err := r.lookupInstance(action.moduleName)
+	if err != nil {
+		return nil, err
+	}
+	if _, ok := meta.globalExports[action.globalName]; !ok {
+		return nil, fmt.Errorf("exported global %q not found", action.globalName)
+	}
+	g, ok := inst.ExportedGlobal(action.globalName)
+	if !ok {
+		return nil, fmt.Errorf("exported global %q not found in wasmvm instance", action.globalName)
+	}
+	value, err := g.Value()
+	if err != nil {
+		return nil, err
+	}
+	converted, err := wasmvmValueToRuntimeValue(value)
+	if err != nil {
+		return nil, err
+	}
+	return []runtimeValue{converted}, nil
 }
 
 // invoke calls one exported function through wasmvm and converts results to
