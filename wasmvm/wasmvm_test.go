@@ -3366,8 +3366,8 @@ func TestExecutionErrorMemoryFillOutOfBoundsContext(t *testing.T) {
 	}
 }
 
-// TestExecutionErrorMemoryInitAfterDataDropContext checks that data.drop makes
-// a data segment unavailable for later memory.init operations.
+// TestExecutionErrorMemoryInitAfterDataDropContext checks that memory.init
+// reports a dropped data segment as an out-of-bounds access.
 func TestExecutionErrorMemoryInitAfterDataDropContext(t *testing.T) {
 	rt := wasmvm.NewRuntime()
 	inst, err := rt.Instantiate(parseWAT(t, `
@@ -3392,7 +3392,7 @@ func TestExecutionErrorMemoryInitAfterDataDropContext(t *testing.T) {
 	if err == nil {
 		t.Fatal("Call succeeded unexpectedly")
 	}
-	if got, want := err.Error(), "pc 4 memory.init: data segment 0 is dropped"; got != want {
+	if got, want := err.Error(), "pc 4 memory.init: data segment out of bounds"; got != want {
 		t.Fatalf("error = %q, want %q", got, want)
 	}
 }

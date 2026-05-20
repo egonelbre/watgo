@@ -383,6 +383,9 @@ func moduleBodyCursor(sx *textformat.SExpr) int {
 }
 
 func isModuleInstanceExpr(sx *textformat.SExpr) bool {
+	if sx == nil {
+		return false
+	}
 	elems := sx.Children()
 	return len(elems) >= 4 &&
 		elems[0].IsKeywordToken("module") &&
@@ -2146,6 +2149,12 @@ func parseStringTokenAt(sx *textformat.SExpr, idx int) (string, error) {
 }
 
 func (r *scriptRunner) instantiateSyntheticDefinition(def *syntheticDefinition) *syntheticInstance {
+	return instantiateSyntheticDefinition(def, &r.nextTagID)
+}
+
+// instantiateSyntheticDefinition creates a harness-mode instance for script
+// module definitions that model resource identity instead of ordinary wasm.
+func instantiateSyntheticDefinition(def *syntheticDefinition, nextTagID *uint64) *syntheticInstance {
 	inst := &syntheticInstance{exports: map[string]syntheticExport{}}
 	globals := map[string]*syntheticGlobal{}
 	tables := map[string]*syntheticTable{}
@@ -2177,8 +2186,8 @@ func (r *scriptRunner) instantiateSyntheticDefinition(def *syntheticDefinition) 
 		case "tag":
 			t := tags[spec.key]
 			if t == nil {
-				t = &syntheticTag{id: r.nextTagID}
-				r.nextTagID++
+				t = &syntheticTag{id: *nextTagID}
+				*nextTagID++
 				tags[spec.key] = t
 			}
 			inst.exports[name] = syntheticExport{kind: "tag", tag: t}
@@ -2191,6 +2200,13 @@ func (r *scriptRunner) instantiateSyntheticDefinition(def *syntheticDefinition) 
 // used by instance.wast and implements it directly in the harness while EH
 // instructions remain outside watgo's compiler subset.
 func (r *scriptRunner) buildSyntheticConsumerModule(moduleExpr *textformat.SExpr) (*syntheticModule, bool, error) {
+	return buildSyntheticConsumerModule(moduleExpr, r.lookupSyntheticInstance)
+}
+
+// buildSyntheticConsumerModule recognizes the resource-identity consumer shape
+// used by instance.wast and implements it directly in the harness while EH
+// instructions remain outside watgo's compiler subset.
+func buildSyntheticConsumerModule(moduleExpr *textformat.SExpr, lookup func(string) (*syntheticInstance, bool)) (*syntheticModule, bool, error) {
 	if moduleExpr == nil || isModuleDefinitionExpr(moduleExpr) || isModuleInstanceExpr(moduleExpr) {
 		return nil, false, nil
 	}
@@ -2212,7 +2228,7 @@ func (r *scriptRunner) buildSyntheticConsumerModule(moduleExpr *textformat.SExpr
 		if err != nil {
 			return nil, false, err
 		}
-		inst, ok := r.lookupSyntheticInstance(modName)
+		inst, ok := lookup(modName)
 		if !ok {
 			return nil, false, nil
 		}
@@ -3076,6 +3092,7 @@ func matchesExpectedFailureText(got, want string) bool {
 	if wantLower == "out of bounds table access" {
 		return strings.Contains(gotLower, "invalid table access") ||
 			strings.Contains(gotLower, "table access out of bounds") ||
+			strings.Contains(gotLower, "element segment access out of bounds") ||
 			strings.Contains(gotLower, "unreachable") ||
 			strings.Contains(gotLower, "table index is out of bounds") ||
 			strings.Contains(gotLower, "element segment out of bounds")

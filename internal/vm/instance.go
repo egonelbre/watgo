@@ -977,7 +977,10 @@ func (inst *Instance) memoryInit(memoryIndex uint32, dataIndex uint32, dstAddres
 		return err
 	}
 	if data.dropped {
-		return fmt.Errorf("data segment %d is dropped", dataIndex)
+		if size == 0 {
+			return nil
+		}
+		return fmt.Errorf("data segment out of bounds")
 	}
 	if srcOffset > uint64(len(data.init)) || size > uint64(len(data.init))-srcOffset {
 		return fmt.Errorf("data segment access out of bounds")

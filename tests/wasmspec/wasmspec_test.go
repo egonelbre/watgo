@@ -274,17 +274,18 @@ func checkWasmSpecScriptPrintRoundTrip(t *testing.T, scriptPath string) {
 func compileWasmSpecCommandForPrintRoundTrip(cmd scriptCommand) ([]byte, bool, error) {
 	switch cmd.kind {
 	case commandModule:
-		if cmd.moduleExpr == nil {
-			return nil, false, nil
-		}
 		// Skip script-only module forms handled specially by the harness. They do
 		// not compile through the ordinary wasm text/binary pipeline.
 		if isModuleDefinitionExpr(cmd.moduleExpr) || isModuleInstanceExpr(cmd.moduleExpr) {
 			return nil, false, nil
 		}
-		// `(module quote "...")` already stores reconstructed module text.
+		// `(module quote "...")` and inline module-field scripts already store
+		// reconstructed module text.
 		if cmd.quotedWAT != "" {
 			return compileWasmSpecModuleText(cmd.quotedWAT)
+		}
+		if cmd.moduleExpr == nil {
+			return nil, false, nil
 		}
 		// `(module binary "...")` contributes a concrete wasm blob directly, so
 		// normalize it through the binary fixed-point helper before comparing it

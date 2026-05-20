@@ -77,15 +77,15 @@ func ExternRef(id uint64) Value {
 //
 // For an import such as (import "env" "inc" (func ...)), the corresponding
 // Go value belongs at imports["env"]["inc"]. Function imports should be a
-// *HostFunc created with NewHostFunc. Memory and table imports should be
-// *Memory and *Table values created by this package or obtained from another
-// instantiated module's exported resources.
+// *HostFunc created with NewHostFunc or a *Func exported from another module.
+// Memory and table imports should be *Memory and *Table values created by this
+// package or obtained from another instantiated module's exported resources.
 type Imports map[string]map[string]Extern
 
 // Extern is a runtime object supplied for a module import.
 //
-// *HostFunc, *Global, *Memory, and *Table are the currently supported Extern
-// implementations.
+// *HostFunc, *Func, *Global, *Memory, and *Table are the currently supported
+// Extern implementations.
 type Extern interface {
 	isExtern()
 }
@@ -359,6 +359,9 @@ type Func struct {
 	index uint32
 }
 
+// isExtern marks Func pointers as valid import objects.
+func (*Func) isExtern() {}
+
 // Call invokes f with WebAssembly runtime values.
 //
 // args must contain one Value per function parameter, in parameter order. On
@@ -469,9 +472,30 @@ func resolveHostFunc(imports Imports, imp wasmir.Import) (HostFunc, error) {
 			return HostFunc{}, fmt.Errorf("import %q.%q is nil", imp.Module, imp.Name)
 		}
 		return *host, nil
+	case *Func:
+		if host == nil {
+			return HostFunc{}, fmt.Errorf("import %q.%q is nil", imp.Module, imp.Name)
+		}
+		return exportedFuncHostFunc(host)
 	default:
 		return HostFunc{}, fmt.Errorf("import %q.%q is not a function", imp.Module, imp.Name)
 	}
+}
+
+// exportedFuncHostFunc adapts an exported WebAssembly function to the existing
+// imported-function callback path used by the internal VM.
+func exportedFuncHostFunc(fn *Func) (HostFunc, error) {
+	ft, err := fn.inst.vm.FuncType(fn.index)
+	if err != nil {
+		return HostFunc{}, err
+	}
+	return HostFunc{
+		Params:  ft.Params,
+		Results: ft.Results,
+		Func: func(ctx *Context, args []Value) ([]Value, error) {
+			return fn.Call(args...)
+		},
+	}, nil
 }
 
 // checkHostFuncType checks that a supplied host function matches the module's

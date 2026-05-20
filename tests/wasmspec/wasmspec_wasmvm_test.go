@@ -11,6 +11,7 @@ import (
 
 	"github.com/eliben/watgo"
 	"github.com/eliben/watgo/internal/binaryformat"
+	"github.com/eliben/watgo/internal/textformat"
 	"github.com/eliben/watgo/internal/validate"
 	"github.com/eliben/watgo/wasmir"
 	"github.com/eliben/watgo/wasmvm"
@@ -64,27 +65,11 @@ var wasmSpecWasmvmDeniedScripts = []string{
 	"scripts/memory64/table_set64.wast",
 	"scripts/memory64/table_size64.wast",
 
-	"scripts/multi-memory/data0.wast",
-	"scripts/multi-memory/data1.wast",
-	"scripts/multi-memory/data_drop0.wast",
-	"scripts/multi-memory/imports1.wast",
-	"scripts/multi-memory/imports2.wast",
-	"scripts/multi-memory/imports4.wast",
 	"scripts/multi-memory/linking0.wast",
-	"scripts/multi-memory/linking1.wast",
-	"scripts/multi-memory/linking3.wast",
 
 	"scripts/relaxed-simd/",
 
-	"scripts/annotations.wast",
-	"scripts/bulk-memory/bulk.wast",
-	"scripts/bulk-memory/table_copy.wast",
 	"scripts/bulk-memory/table_init.wast",
-	"scripts/imports.wast",
-	"scripts/inline-module.wast",
-	"scripts/instance.wast",
-	"scripts/linking.wast",
-	"scripts/ref_func.wast",
 	"scripts/return_call.wast",
 	"scripts/return_call_indirect.wast",
 	"scripts/return_call_ref.wast",
@@ -122,7 +107,6 @@ var wasmSpecWasmvmDeniedScripts = []string{
 	"scripts/simd/simd_store32_lane.wast",
 	"scripts/simd/simd_store64_lane.wast",
 	"scripts/simd/simd_store8_lane.wast",
-	"scripts/table.wast",
 	"scripts/table_grow.wast",
 	"scripts/type-equivalence.wast",
 	"scripts/type-rec.wast",
@@ -133,10 +117,15 @@ type wasmSpecWasmvmRunner struct {
 	imports            wasmvm.Imports
 	current            *wasmvm.ModuleInstance
 	currentMeta        *moduleMetadata
+	currentSynthetic   *syntheticModule
 	currentRuntimeName string
 	instances          map[string]*wasmvm.ModuleInstance
+	moduleDefs         map[string]*syntheticDefinition
 	moduleMeta         map[string]*moduleMetadata
 	moduleAlias        map[string]string
+	syntheticInstances map[string]*syntheticInstance
+	syntheticModules   map[string]*syntheticModule
+	nextTagID          uint64
 }
 
 // wasmSpecWasmvmBackend returns the initial wasmvm-backed wasmspec runner.
@@ -211,11 +200,14 @@ func wasmSpecWasmvmScriptDenied(scriptPath string) bool {
 // newWasmSpecWasmvmRunner creates an empty wasmvm script runner.
 func newWasmSpecWasmvmRunner() *wasmSpecWasmvmRunner {
 	return &wasmSpecWasmvmRunner{
-		rt:          wasmvm.NewRuntime(),
-		imports:     wasmSpecWasmvmSpectestImports(),
-		instances:   map[string]*wasmvm.ModuleInstance{},
-		moduleMeta:  map[string]*moduleMetadata{},
-		moduleAlias: map[string]string{},
+		rt:                 wasmvm.NewRuntime(),
+		imports:            wasmSpecWasmvmSpectestImports(),
+		instances:          map[string]*wasmvm.ModuleInstance{},
+		moduleDefs:         map[string]*syntheticDefinition{},
+		moduleMeta:         map[string]*moduleMetadata{},
+		moduleAlias:        map[string]string{},
+		syntheticInstances: map[string]*syntheticInstance{},
+		syntheticModules:   map[string]*syntheticModule{},
 	}
 }
 
@@ -321,6 +313,8 @@ func (r *wasmSpecWasmvmRunner) runCommand(res *commandResult, cmd scriptCommand,
 	switch cmd.kind {
 	case commandModule:
 		r.runModule(res, cmd)
+	case commandModuleInstance:
+		r.runModuleInstance(res, cmd)
 	case commandInvoke:
 		r.runInvoke(res, cmd)
 	case commandRegister:
@@ -346,9 +340,37 @@ func (r *wasmSpecWasmvmRunner) runCommand(res *commandResult, cmd scriptCommand,
 // runModule compiles and instantiates a top-level module command.
 func (r *wasmSpecWasmvmRunner) runModule(res *commandResult, cmd scriptCommand) {
 	if isModuleDefinitionExpr(cmd.moduleExpr) {
+		def, ok, err := buildSyntheticDefinition(cmd.moduleExpr)
+		if err != nil {
+			res.status = false
+			res.detail = fmt.Sprintf("module definition parse failed: %v", err)
+			return
+		}
+		if ok {
+			r.moduleDefs[cmd.moduleName] = def
+			r.current = nil
+			r.currentMeta = nil
+			r.currentSynthetic = nil
+			r.currentRuntimeName = cmd.moduleName
+			res.status = true
+			return
+		}
+	}
+	if synth, ok, err := r.buildSyntheticConsumerModule(cmd.moduleExpr); err != nil {
+		res.status = false
+		res.detail = fmt.Sprintf("module synth failed: %v", err)
+		return
+	} else if ok {
+		runtimeName := runtimeModuleName(cmd.moduleName)
 		r.current = nil
-		r.currentMeta = nil
-		r.currentRuntimeName = cmd.moduleName
+		r.currentMeta = synth.meta
+		r.currentSynthetic = synth
+		r.currentRuntimeName = runtimeName
+		if cmd.moduleName != "" {
+			r.syntheticModules[runtimeName] = synth
+			r.moduleMeta[runtimeName] = synth.meta
+			r.moduleAlias[cmd.moduleName] = runtimeName
+		}
 		res.status = true
 		return
 	}
@@ -370,15 +392,36 @@ func (r *wasmSpecWasmvmRunner) runModule(res *commandResult, cmd scriptCommand) 
 	runtimeName := runtimeModuleName(cmd.moduleName)
 	r.current = inst
 	r.currentMeta = meta
+	r.currentSynthetic = nil
 	r.currentRuntimeName = runtimeName
 	r.instances[runtimeName] = inst
 	r.moduleMeta[runtimeName] = meta
 	if cmd.moduleName != "" {
 		r.moduleAlias[cmd.moduleName] = runtimeName
 	}
+	r.bindFunctionExports(runtimeName, inst, m)
 	r.bindGlobalExports(runtimeName, inst, m)
 	r.bindMemoryExports(runtimeName, inst, m)
 	r.bindTableExports(runtimeName, inst, m)
+	res.status = true
+}
+
+// runModuleInstance handles "(module instance $I $M)" for harness synthetic
+// module definitions.
+func (r *wasmSpecWasmvmRunner) runModuleInstance(res *commandResult, cmd scriptCommand) {
+	def, ok := r.moduleDefs[cmd.instanceOf]
+	if !ok {
+		res.status = false
+		res.detail = fmt.Sprintf("module definition %q not found", cmd.instanceOf)
+		return
+	}
+	inst := instantiateSyntheticDefinition(def, &r.nextTagID)
+	r.syntheticInstances[cmd.moduleName] = inst
+	r.moduleAlias[cmd.moduleName] = cmd.moduleName
+	r.current = nil
+	r.currentMeta = nil
+	r.currentSynthetic = nil
+	r.currentRuntimeName = cmd.moduleName
 	res.status = true
 }
 
@@ -393,6 +436,31 @@ func (r *wasmSpecWasmvmRunner) runRegister(res *commandResult, cmd scriptCommand
 	sourceName := cmd.registerFrom
 	if sourceName == "" {
 		sourceName = r.currentRuntimeName
+	}
+	if synthInst, ok := r.lookupSyntheticInstance(sourceName); ok {
+		r.syntheticInstances[cmd.registerName] = synthInst
+		r.moduleAlias[cmd.registerName] = cmd.registerName
+		if cmd.registerFrom != "" {
+			r.moduleAlias[cmd.registerFrom] = cmd.registerName
+		}
+		res.status = true
+		return
+	}
+	if synth, ok := r.lookupSyntheticModule(sourceName); ok {
+		r.syntheticModules[cmd.registerName] = synth
+		r.moduleMeta[cmd.registerName] = synth.meta
+		r.moduleAlias[cmd.registerName] = cmd.registerName
+		if cmd.registerFrom != "" {
+			r.moduleAlias[cmd.registerFrom] = cmd.registerName
+		}
+		if sourceName == r.currentRuntimeName {
+			r.current = nil
+			r.currentMeta = synth.meta
+			r.currentSynthetic = synth
+			r.currentRuntimeName = cmd.registerName
+		}
+		res.status = true
+		return
 	}
 	inst, meta, err := r.lookupInstance(sourceName)
 	if err != nil {
@@ -410,9 +478,28 @@ func (r *wasmSpecWasmvmRunner) runRegister(res *commandResult, cmd scriptCommand
 	if sourceName == r.currentRuntimeName {
 		r.current = inst
 		r.currentMeta = meta
+		r.currentSynthetic = nil
 		r.currentRuntimeName = cmd.registerName
 	}
 	res.status = true
+}
+
+// bindFunctionExports exposes function exports under runtimeName for later
+// function imports in the same spec script.
+func (r *wasmSpecWasmvmRunner) bindFunctionExports(runtimeName string, inst *wasmvm.ModuleInstance, m *wasmir.Module) {
+	for _, exp := range m.Exports {
+		if exp.Kind != wasmir.ExternalKindFunction {
+			continue
+		}
+		fn, ok := inst.ExportedFunc(exp.Name)
+		if !ok {
+			continue
+		}
+		if r.imports[runtimeName] == nil {
+			r.imports[runtimeName] = map[string]wasmvm.Extern{}
+		}
+		r.imports[runtimeName][exp.Name] = fn
+	}
 }
 
 // bindGlobalExports exposes global exports under runtimeName for later global
@@ -661,6 +748,9 @@ func (r *wasmSpecWasmvmRunner) get(action *getAction) ([]runtimeValue, error) {
 	if action == nil {
 		return nil, fmt.Errorf("nil get action")
 	}
+	if synth, ok := r.lookupSyntheticModule(action.moduleName); ok {
+		return synth.get(action.globalName)
+	}
 	inst, meta, err := r.lookupInstance(action.moduleName)
 	if err != nil {
 		return nil, err
@@ -689,6 +779,9 @@ func (r *wasmSpecWasmvmRunner) invoke(action *invokeAction) ([]runtimeValue, err
 	if action == nil {
 		return nil, fmt.Errorf("nil invoke action")
 	}
+	if synth, ok := r.lookupSyntheticModule(action.moduleName); ok {
+		return synth.invoke(action.funcName)
+	}
 	inst, meta, err := r.lookupInstance(action.moduleName)
 	if err != nil {
 		return nil, err
@@ -716,6 +809,39 @@ func (r *wasmSpecWasmvmRunner) invoke(action *invokeAction) ([]runtimeValue, err
 		return nil, err
 	}
 	return wasmvmValuesToRuntimeValues(results)
+}
+
+// buildSyntheticConsumerModule delegates recognized resource-identity consumer
+// modules to the shared wasmspec synthetic harness path.
+func (r *wasmSpecWasmvmRunner) buildSyntheticConsumerModule(moduleExpr *textformat.SExpr) (*syntheticModule, bool, error) {
+	return buildSyntheticConsumerModule(moduleExpr, r.lookupSyntheticInstance)
+}
+
+// lookupSyntheticInstance resolves a script module name to a synthetic
+// resource-identity instance.
+func (r *wasmSpecWasmvmRunner) lookupSyntheticInstance(name string) (*syntheticInstance, bool) {
+	if aliased, ok := r.moduleAlias[name]; ok {
+		name = aliased
+	}
+	inst, ok := r.syntheticInstances[name]
+	return inst, ok
+}
+
+// lookupSyntheticModule resolves a script module name to a synthetic module
+// implemented by the harness.
+func (r *wasmSpecWasmvmRunner) lookupSyntheticModule(scriptModuleName string) (*syntheticModule, bool) {
+	if scriptModuleName == "" {
+		if r.currentSynthetic != nil {
+			return r.currentSynthetic, true
+		}
+		return nil, false
+	}
+	runtimeName := scriptModuleName
+	if aliased, ok := r.moduleAlias[scriptModuleName]; ok {
+		runtimeName = aliased
+	}
+	synth, ok := r.syntheticModules[runtimeName]
+	return synth, ok
 }
 
 // lookupInstance resolves a script module name to a wasmvm instance and its
