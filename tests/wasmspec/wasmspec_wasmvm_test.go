@@ -77,7 +77,6 @@ var wasmSpecWasmvmDeniedScripts = []string{
 	"scripts/relaxed-simd/",
 
 	"scripts/annotations.wast",
-	"scripts/binary-leb128.wast",
 	"scripts/bulk-memory/bulk.wast",
 	"scripts/bulk-memory/table_copy.wast",
 	"scripts/bulk-memory/table_init.wast",

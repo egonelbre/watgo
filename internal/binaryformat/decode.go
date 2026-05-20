@@ -1095,13 +1095,13 @@ func decodeElementSection(r *bytes.Reader, diags *diag.ErrorList) []wasmir.Eleme
 	}
 	out := make([]wasmir.ElementSegment, 0, capN)
 	for i := uint32(0); i < n; i++ {
-		flags, err := readByte(r)
+		flags, err := readU32(r)
 		if err != nil {
 			diags.Addf("element[%d]: missing flags: %v", i, err)
 			break
 		}
 		switch flags {
-		case elemSegmentFlagActiveTable0FuncIndices:
+		case uint32(elemSegmentFlagActiveTable0FuncIndices):
 			offsetExpr, err := decodeConstExprInstrs(r)
 			if err != nil {
 				diags.Addf("element[%d]: invalid offset expr: %v", i, err)
@@ -1115,7 +1115,7 @@ func decodeElementSection(r *bytes.Reader, diags *diag.ErrorList) []wasmir.Eleme
 				FuncIndices: funcIndices,
 				RefType:     wasmir.RefTypeFunc(true),
 			})
-		case elemSegmentFlagPassiveFuncIndices:
+		case uint32(elemSegmentFlagPassiveFuncIndices):
 			elemKind, err := readByte(r)
 			if err != nil {
 				diags.Addf("element[%d]: missing elemkind: %v", i, err)
@@ -1131,7 +1131,7 @@ func decodeElementSection(r *bytes.Reader, diags *diag.ErrorList) []wasmir.Eleme
 				FuncIndices: funcIndices,
 				RefType:     wasmir.RefTypeFunc(true),
 			})
-		case elemSegmentFlagActiveExplicitTableFuncIndices:
+		case uint32(elemSegmentFlagActiveExplicitTableFuncIndices):
 			tableIndex, err := readU32(r)
 			if err != nil {
 				diags.Addf("element[%d]: invalid table index: %v", i, err)
@@ -1159,7 +1159,7 @@ func decodeElementSection(r *bytes.Reader, diags *diag.ErrorList) []wasmir.Eleme
 				FuncIndices: funcIndices,
 				RefType:     wasmir.RefTypeFunc(true),
 			})
-		case elemSegmentFlagDeclarativeFuncIndices:
+		case uint32(elemSegmentFlagDeclarativeFuncIndices):
 			elemKind, err := readByte(r)
 			if err != nil {
 				diags.Addf("element[%d]: missing elemkind: %v", i, err)
@@ -1175,7 +1175,7 @@ func decodeElementSection(r *bytes.Reader, diags *diag.ErrorList) []wasmir.Eleme
 				FuncIndices: funcIndices,
 				RefType:     wasmir.RefTypeFunc(true),
 			})
-		case elemSegmentFlagActiveExplicitTableExprs:
+		case uint32(elemSegmentFlagActiveExplicitTableExprs):
 			tableIndex, err := readU32(r)
 			if err != nil {
 				diags.Addf("element[%d]: invalid table index: %v", i, err)
@@ -1217,7 +1217,7 @@ func decodeElementSection(r *bytes.Reader, diags *diag.ErrorList) []wasmir.Eleme
 				Exprs:      exprs,
 				RefType:    refType,
 			})
-		case elemSegmentFlagActiveTable0Exprs:
+		case uint32(elemSegmentFlagActiveTable0Exprs):
 			offsetExpr, err := decodeConstExprInstrs(r)
 			if err != nil {
 				diags.Addf("element[%d]: invalid offset expr: %v", i, err)
@@ -1249,7 +1249,7 @@ func decodeElementSection(r *bytes.Reader, diags *diag.ErrorList) []wasmir.Eleme
 				Exprs:      exprs,
 				RefType:    wasmir.RefTypeFunc(true),
 			})
-		case elemSegmentFlagPassiveExprs, elemSegmentFlagDeclarativeExprs:
+		case uint32(elemSegmentFlagPassiveExprs), uint32(elemSegmentFlagDeclarativeExprs):
 			refType, err := decodeRefTypeFromReader(r)
 			if err != nil {
 				diags.Addf("element[%d]: invalid ref type: %v", i, err)
@@ -1275,7 +1275,7 @@ func decodeElementSection(r *bytes.Reader, diags *diag.ErrorList) []wasmir.Eleme
 				exprs = append(exprs, expr)
 			}
 			mode := wasmir.ElemSegmentModePassive
-			if flags == elemSegmentFlagDeclarativeExprs {
+			if flags == uint32(elemSegmentFlagDeclarativeExprs) {
 				mode = wasmir.ElemSegmentModeDeclarative
 			}
 			out = append(out, wasmir.ElementSegment{
@@ -1303,7 +1303,7 @@ func decodeDataSection(r *bytes.Reader, diags *diag.ErrorList) []wasmir.DataSegm
 	}
 	out := make([]wasmir.DataSegment, 0, capN)
 	for i := uint32(0); i < n; i++ {
-		flags, err := readByte(r)
+		flags, err := readU32(r)
 		if err != nil {
 			diags.Addf("data[%d]: missing flags: %v", i, err)
 			break
@@ -1311,11 +1311,11 @@ func decodeDataSection(r *bytes.Reader, diags *diag.ErrorList) []wasmir.DataSegm
 		seg := wasmir.DataSegment{}
 		segOK := true
 		switch flags {
-		case dataSegmentFlagPassive:
+		case uint32(dataSegmentFlagPassive):
 			seg.Mode = wasmir.DataSegmentModePassive
-		case dataSegmentFlagActiveMem0, dataSegmentFlagActiveExplicitMemory:
+		case uint32(dataSegmentFlagActiveMem0), uint32(dataSegmentFlagActiveExplicitMemory):
 			seg.Mode = wasmir.DataSegmentModeActive
-			if flags == dataSegmentFlagActiveExplicitMemory {
+			if flags == uint32(dataSegmentFlagActiveExplicitMemory) {
 				memoryIndex, err := readU32(r)
 				if err != nil {
 					diags.Addf("data[%d]: invalid memory index: %v", i, err)
