@@ -40,7 +40,6 @@ var wasmSpecWasmvmDeniedScripts = []string{
 	"scripts/data.wast",
 	"scripts/elem.wast",
 	"scripts/fac.wast",
-	"scripts/func.wast",
 	"scripts/imports.wast",
 	"scripts/inline-module.wast",
 	"scripts/instance.wast",
