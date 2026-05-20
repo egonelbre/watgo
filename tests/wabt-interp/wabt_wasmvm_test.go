@@ -167,7 +167,7 @@ func wabtWasmvmBindImports(m *wasmir.Module, imports []wabtImport) (*wasmir.Modu
 // run-interp flags.
 func wabtWasmvmImports(imports []wabtWasmvmImportBinding, hostPrint bool, dummyImportFunc bool, hostPrintResultKind string, stdout *[]string) (wasmvm.Imports, error) {
 	var out wasmvm.Imports
-	add := func(module string, name string, host wasmvm.HostFunc) error {
+	add := func(module string, name string, host *wasmvm.HostFunc) error {
 		if out == nil {
 			out = make(wasmvm.Imports)
 		}
@@ -206,14 +206,14 @@ func wabtWasmvmImports(imports []wabtWasmvmImportBinding, hostPrint bool, dummyI
 }
 
 // wabtWasmvmHostPrint returns a host.print shim for the wasmvm backend.
-func wabtWasmvmHostPrint(imported wabtImport, hostPrintResultKind string, stdout *[]string) (wasmvm.HostFunc, error) {
+func wabtWasmvmHostPrint(imported wabtImport, hostPrintResultKind string, stdout *[]string) (*wasmvm.HostFunc, error) {
 	params, err := wabtWasmvmValueTypes(imported.ParamKinds)
 	if err != nil {
-		return wasmvm.HostFunc{}, err
+		return nil, err
 	}
 	results, err := wabtWasmvmResultTypes(imported.ResultKind)
 	if err != nil {
-		return wasmvm.HostFunc{}, err
+		return nil, err
 	}
 	return wasmvm.NewHostFunc(params, results, func(_ *wasmvm.Context, args []wasmvm.Value) ([]wasmvm.Value, error) {
 		formattedArgs := make([]string, 0, len(args))
@@ -231,14 +231,14 @@ func wabtWasmvmHostPrint(imported wabtImport, hostPrintResultKind string, stdout
 
 // wabtWasmvmDummyImport returns a dummy host function for the wasmvm
 // backend.
-func wabtWasmvmDummyImport(imported wabtImport, stdout *[]string) (wasmvm.HostFunc, error) {
+func wabtWasmvmDummyImport(imported wabtImport, stdout *[]string) (*wasmvm.HostFunc, error) {
 	params, err := wabtWasmvmValueTypes(imported.ParamKinds)
 	if err != nil {
-		return wasmvm.HostFunc{}, err
+		return nil, err
 	}
 	results, err := wabtWasmvmResultTypes(imported.ResultKind)
 	if err != nil {
-		return wasmvm.HostFunc{}, err
+		return nil, err
 	}
 	return wasmvm.NewHostFunc(params, results, func(_ *wasmvm.Context, args []wasmvm.Value) ([]wasmvm.Value, error) {
 		formattedArgs := make([]string, 0, len(args))

@@ -213,7 +213,7 @@ func wasmSpecWasmvmSpectestImports() wasmvm.Imports {
 
 // wasmSpecWasmvmHostFunc returns a no-op host function with params and no
 // results.
-func wasmSpecWasmvmHostFunc(params []wasmir.ValueType) wasmvm.HostFunc {
+func wasmSpecWasmvmHostFunc(params []wasmir.ValueType) *wasmvm.HostFunc {
 	return wasmvm.NewHostFunc(params, nil, func(ctx *wasmvm.Context, args []wasmvm.Value) ([]wasmvm.Value, error) {
 		return nil, nil
 	})

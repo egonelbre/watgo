@@ -119,8 +119,8 @@ func (HostFunc) isExtern() {}
 // params and results are copied by reference, so callers should treat them as
 // immutable after passing them here. fn must be non-nil before the HostFunc is
 // used to instantiate a module; otherwise Instantiate returns an error.
-func NewHostFunc(params, results []wasmir.ValueType, fn func(ctx *Context, args []Value) ([]Value, error)) HostFunc {
-	return HostFunc{Params: params, Results: results, Func: fn}
+func NewHostFunc(params, results []wasmir.ValueType, fn func(ctx *Context, args []Value) ([]Value, error)) *HostFunc {
+	return &HostFunc{Params: params, Results: results, Func: fn}
 }
 
 // Memory is an instantiated WebAssembly linear memory exposed for imports.
@@ -351,8 +351,6 @@ func resolveMemoryImport(imports Imports, def wasmir.Memory) (*Memory, error) {
 		return nil, fmt.Errorf("missing import %q.%q", def.ImportModule, def.ImportName)
 	}
 	switch mem := ext.(type) {
-	case Memory:
-		return &mem, nil
 	case *Memory:
 		if mem == nil {
 			return nil, fmt.Errorf("import %q.%q is nil", def.ImportModule, def.ImportName)
@@ -374,8 +372,6 @@ func resolveGlobalImport(imports Imports, def wasmir.Global) (*Global, error) {
 		return nil, fmt.Errorf("missing import %q.%q", def.ImportModule, def.ImportName)
 	}
 	switch global := ext.(type) {
-	case Global:
-		return &global, nil
 	case *Global:
 		if global == nil {
 			return nil, fmt.Errorf("import %q.%q is nil", def.ImportModule, def.ImportName)
@@ -397,8 +393,6 @@ func resolveHostFunc(imports Imports, imp wasmir.Import) (HostFunc, error) {
 		return HostFunc{}, fmt.Errorf("missing import %q.%q", imp.Module, imp.Name)
 	}
 	switch host := ext.(type) {
-	case HostFunc:
-		return host, nil
 	case *HostFunc:
 		if host == nil {
 			return HostFunc{}, fmt.Errorf("import %q.%q is nil", imp.Module, imp.Name)
