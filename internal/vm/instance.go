@@ -331,7 +331,7 @@ func (inst *Instance) buildFuncs() error {
 	}
 	for i := range inst.m.Funcs {
 		f := &inst.m.Funcs[i]
-		code, err := compileFunction(f)
+		code, err := compileFunction(inst.m, f)
 		if err != nil {
 			return fmt.Errorf("func[%d]: %w", len(inst.funcs), err)
 		}

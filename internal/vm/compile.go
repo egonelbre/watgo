@@ -22,16 +22,21 @@ type function struct {
 	// have been normalized for execution.
 	code []instr
 
+	// labels stores execution metadata for structured-control openers, keyed by
+	// the opener instruction pc. The executor uses it to maintain the active
+	// label stack and to normalize operand-stack height on branches and end.
+	labels map[int]controlLabel
+
 	// branchTables stores the variable-length target lists used by br_table
 	// instructions. A br_table instruction keeps its fixed-size instr small by
 	// storing the index of its target list in instr.index.
 	//
-	// Each target list contains already-resolved program counters, in the same
-	// order as the source instruction's BranchTable depths. The default target
-	// is appended as the final element, so execution can use selector values
-	// below len(table)-1 as direct table indices and use len(table)-1 for the
-	// default case.
-	branchTables [][]int
+	// Each target list contains resolved targets in the same order as the
+	// source instruction's BranchTable depths. The default target is appended
+	// as the final element, so execution can use selector values below
+	// len(table)-1 as direct table indices and use len(table)-1 for the default
+	// case.
+	branchTables [][]branchTarget
 
 	// refTypes stores reference type immediates used by ref.null instructions.
 	// A ref.null instruction keeps its fixed-size instr small by storing the
@@ -83,8 +88,20 @@ type instr struct {
 	bits int64
 }
 
+// branchTarget is one resolved branch destination in the VM's execution form.
+type branchTarget struct {
+	// pc is the program counter assigned to the executor before the executor's
+	// loop increment selects the next instruction to run.
+	pc int
+
+	// depth is the original label-depth immediate. The executor uses it to find
+	// the active runtime label whose stack height and branch arity must be
+	// applied.
+	depth uint32
+}
+
 // compileFunction compiles a semantic function body into the VM's execution form.
-func compileFunction(fn *wasmir.Function) (*function, error) {
+func compileFunction(m *wasmir.Module, fn *wasmir.Function) (*function, error) {
 	ctrl, err := analyzeControl(fn.Body)
 	if err != nil {
 		return nil, err
@@ -93,21 +110,30 @@ func compileFunction(fn *wasmir.Function) (*function, error) {
 	out := &function{
 		locals: slices.Clone(fn.Locals),
 		code:   make([]instr, len(fn.Body)),
+		labels: ctrl.labels,
 	}
 	labelStack := make([]int, 0)
+	finalEnd := len(fn.Body) - 1
 
 	for pc, ins := range fn.Body {
 		op := instr{kind: ins.Kind, target: -1, bits: -1}
 		switch ins.Kind {
 		case wasmir.InstrBlock, wasmir.InstrLoop:
-			if _, ok := ctrl.labels[pc]; !ok {
+			label, ok := ctrl.labels[pc]
+			if !ok {
 				return nil, fmt.Errorf("%s at %d has no matching end", instrName(ins.Kind), pc)
+			}
+			if err := setControlLabelSignature(m, ins, label, ctrl.labels, pc); err != nil {
+				return nil, err
 			}
 			labelStack = append(labelStack, pc)
 		case wasmir.InstrIf:
 			label, ok := ctrl.labels[pc]
 			if !ok {
 				return nil, fmt.Errorf("if at %d has no matching end", pc)
+			}
+			if err := setControlLabelSignature(m, ins, label, ctrl.labels, pc); err != nil {
+				return nil, err
 			}
 			if label.elseIndex >= 0 {
 				op.target = label.elseIndex
@@ -187,21 +213,22 @@ func compileFunction(fn *wasmir.Function) (*function, error) {
 			op.index = ins.MemoryIndex
 			op.bits = int64(ins.MemoryOffset)
 		case wasmir.InstrBr, wasmir.InstrBrIf, wasmir.InstrBrOnNull, wasmir.InstrBrOnNonNull:
-			target, err := compileBranchTarget(ins.BranchDepth, labelStack, ctrl)
+			target, err := compileBranchTarget(ins.BranchDepth, labelStack, ctrl, finalEnd)
 			if err != nil {
 				return nil, fmt.Errorf("%s at %d: %w", instrName(ins.Kind), pc, err)
 			}
-			op.target = target
+			op.target = target.pc
+			op.bits = int64(target.depth)
 		case wasmir.InstrBrTable:
-			targets := make([]int, 0, len(ins.BranchTable)+1)
+			targets := make([]branchTarget, 0, len(ins.BranchTable)+1)
 			for i, depth := range ins.BranchTable {
-				target, err := compileBranchTarget(depth, labelStack, ctrl)
+				target, err := compileBranchTarget(depth, labelStack, ctrl, finalEnd)
 				if err != nil {
 					return nil, fmt.Errorf("br_table at %d target %d: %w", pc, i, err)
 				}
 				targets = append(targets, target)
 			}
-			target, err := compileBranchTarget(ins.BranchDefault, labelStack, ctrl)
+			target, err := compileBranchTarget(ins.BranchDefault, labelStack, ctrl, finalEnd)
 			if err != nil {
 				return nil, fmt.Errorf("br_table at %d default target: %w", pc, err)
 			}
@@ -352,16 +379,56 @@ func compileFunction(fn *wasmir.Function) (*function, error) {
 	return out, nil
 }
 
-func compileBranchTarget(depth uint32, labelStack []int, ctrl controlInfo) (int, error) {
-	if int(depth) >= len(labelStack) {
-		return 0, fmt.Errorf("branch depth %d out of range", depth)
+// setControlLabelSignature records the runtime stack contract for one
+// structured-control label.
+func setControlLabelSignature(m *wasmir.Module, ins wasmir.Instruction, label controlLabel, labels map[int]controlLabel, pc int) error {
+	params, results, err := controlSignature(m, ins)
+	if err != nil {
+		return fmt.Errorf("%s at %d: %w", instrName(ins.Kind), pc, err)
+	}
+	label.paramArity = len(params)
+	label.resultArity = len(results)
+	label.branchArity = len(results)
+	if ins.Kind == wasmir.InstrLoop {
+		label.isLoop = true
+		label.branchArity = len(params)
+	}
+	labels[pc] = label
+	return nil
+}
+
+// controlSignature resolves a structured-control instruction's block type.
+func controlSignature(m *wasmir.Module, ins wasmir.Instruction) ([]wasmir.ValueType, []wasmir.ValueType, error) {
+	if ins.BlockTypeUsesIndex {
+		if int(ins.BlockTypeIndex) >= len(m.Types) {
+			return nil, nil, fmt.Errorf("block type index %d out of range", ins.BlockTypeIndex)
+		}
+		ft := m.Types[ins.BlockTypeIndex]
+		if ft.Kind != wasmir.TypeDefKindFunc {
+			return nil, nil, fmt.Errorf("block type index %d is not a function type", ins.BlockTypeIndex)
+		}
+		return ft.Params, ft.Results, nil
+	}
+	if ins.BlockType != nil {
+		return nil, []wasmir.ValueType{*ins.BlockType}, nil
+	}
+	return nil, nil, nil
+}
+
+// compileBranchTarget resolves a label-depth immediate to a branch target.
+func compileBranchTarget(depth uint32, labelStack []int, ctrl controlInfo, finalEnd int) (branchTarget, error) {
+	if int(depth) > len(labelStack) {
+		return branchTarget{}, fmt.Errorf("branch depth %d out of range", depth)
+	}
+	if int(depth) == len(labelStack) {
+		return branchTarget{pc: finalEnd - 1, depth: depth}, nil
 	}
 	start := labelStack[len(labelStack)-1-int(depth)]
 	label, ok := ctrl.labels[start]
 	if !ok {
-		return 0, fmt.Errorf("branch target at %d has no matching end", start)
+		return branchTarget{}, fmt.Errorf("branch target at %d has no matching end", start)
 	}
-	return label.branchTarget, nil
+	return branchTarget{pc: label.branchTarget, depth: depth}, nil
 }
 
 // controlLabel describes one structured-control label in the flattened
@@ -376,6 +443,10 @@ type controlLabel struct {
 	endIndex     int
 	branchTarget int
 	elseIndex    int
+	paramArity   int
+	resultArity  int
+	branchArity  int
+	isLoop       bool
 }
 
 // controlInfo stores precomputed control-boundary metadata by opening

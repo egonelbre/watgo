@@ -193,6 +193,29 @@ type executor struct {
 
 	// stack is the operand stack for this frame.
 	stack []Value
+
+	// labels is the active structured-control label stack for this frame. The
+	// first label is the implicit function label; block, loop, and if push
+	// additional labels while their bodies execute.
+	labels []runtimeLabel
+}
+
+// runtimeLabel is one active structured-control label during execution.
+type runtimeLabel struct {
+	// height is the operand stack height at label entry, before label params.
+	height int
+
+	// resultArity is the number of values left by normal fallthrough.
+	resultArity int
+
+	// branchArity is the number of values consumed by a branch to this label.
+	// For loops this is the parameter arity; for blocks and ifs this is the
+	// result arity.
+	branchArity int
+
+	// isLoop reports whether branches to this label jump to the loop body
+	// rather than exiting the label.
+	isLoop bool
 }
 
 // executeFunction interprets one compiled module-defined function body.
@@ -206,6 +229,11 @@ func executeFunction(fn *function, ft wasmir.TypeDef, args []Value, inst *Instan
 		ft:    ft,
 		inst:  inst,
 		stack: make([]Value, 0),
+		labels: []runtimeLabel{{
+			height:      0,
+			resultArity: len(ft.Results),
+			branchArity: len(ft.Results),
+		}},
 	}
 	if err := e.initLocals(args); err != nil {
 		return nil, err
@@ -233,7 +261,11 @@ func (e *executor) run() ([]Value, error) {
 	for e.pc = 0; e.pc < len(e.fn.code); e.pc++ {
 		ins := e.fn.code[e.pc]
 		switch ins.kind {
-		case wasmir.InstrBlock, wasmir.InstrLoop, wasmir.InstrNop:
+		case wasmir.InstrBlock, wasmir.InstrLoop:
+			if err := e.enterLabel(e.pc); err != nil {
+				return nil, e.instructionError(err)
+			}
+		case wasmir.InstrNop:
 		case wasmir.InstrUnreachable:
 			return nil, e.instructionError(fmt.Errorf("unreachable executed"))
 		case wasmir.InstrIf:
@@ -245,12 +277,28 @@ func (e *executor) run() ([]Value, error) {
 				return nil, e.instructionError(err)
 			}
 			if cond == 0 {
+				if err := e.enterLabel(e.pc); err != nil {
+					return nil, e.instructionError(err)
+				}
+				if ins.target >= 0 && ins.target < len(e.fn.code) && e.fn.code[ins.target].kind == wasmir.InstrElse {
+					e.pc = ins.target
+					continue
+				}
+				if err := e.exitLabel(); err != nil {
+					return nil, e.instructionError(err)
+				}
 				e.pc = ins.target
 				continue
+			}
+			if err := e.enterLabel(e.pc); err != nil {
+				return nil, e.instructionError(err)
 			}
 		case wasmir.InstrElse:
 			// Reaching else normally means the then arm completed without
 			// branching. Skip the else arm.
+			if err := e.exitLabel(); err != nil {
+				return nil, e.instructionError(err)
+			}
 			e.pc = ins.target
 		case wasmir.InstrLocalGet:
 			if int(ins.index) >= len(e.locals) {
@@ -1067,7 +1115,9 @@ func (e *executor) run() ([]Value, error) {
 			}
 			return results, nil
 		case wasmir.InstrBr:
-			e.pc = ins.target
+			if err := e.branchTo(uint32(ins.bits), ins.target); err != nil {
+				return nil, e.instructionError(err)
+			}
 		case wasmir.InstrBrIf:
 			// br_if consumes only the condition. Any branch result values are
 			// already below it on the operand stack and are left there for the
@@ -1077,7 +1127,9 @@ func (e *executor) run() ([]Value, error) {
 				return nil, e.instructionError(err)
 			}
 			if cond != 0 {
-				e.pc = ins.target
+				if err := e.branchTo(uint32(ins.bits), ins.target); err != nil {
+					return nil, e.instructionError(err)
+				}
 			}
 		case wasmir.InstrBrOnNull:
 			v, err := e.pop()
@@ -1088,7 +1140,9 @@ func (e *executor) run() ([]Value, error) {
 				return nil, e.instructionError(fmt.Errorf("br_on_null got %s operand", v.Type))
 			}
 			if v.Ref.Kind == RefKindNull {
-				e.pc = ins.target
+				if err := e.branchTo(uint32(ins.bits), ins.target); err != nil {
+					return nil, e.instructionError(err)
+				}
 				continue
 			}
 			v.Type.Nullable = false
@@ -1104,7 +1158,9 @@ func (e *executor) run() ([]Value, error) {
 			if v.Ref.Kind != RefKindNull {
 				v.Type.Nullable = false
 				e.push(v)
-				e.pc = ins.target
+				if err := e.branchTo(uint32(ins.bits), ins.target); err != nil {
+					return nil, e.instructionError(err)
+				}
 				continue
 			}
 		case wasmir.InstrBrTable:
@@ -1125,10 +1181,14 @@ func (e *executor) run() ([]Value, error) {
 			}
 			targetIndex := uint32(selector)
 			defaultIndex := len(targets) - 1
+			var target branchTarget
 			if uint64(targetIndex) < uint64(defaultIndex) {
-				e.pc = targets[int(targetIndex)]
+				target = targets[int(targetIndex)]
 			} else {
-				e.pc = targets[defaultIndex]
+				target = targets[defaultIndex]
+			}
+			if err := e.branchTo(target.depth, target.pc); err != nil {
+				return nil, e.instructionError(err)
 			}
 		case wasmir.InstrReturn:
 			results, err := e.popResults(e.ft.Results)
@@ -1138,10 +1198,9 @@ func (e *executor) run() ([]Value, error) {
 			return results, nil
 		case wasmir.InstrEnd:
 			if e.pc != len(e.fn.code)-1 {
-				// Non-final end closes structured control. Branch targets skip
-				// over it, and ordinary fallthrough can treat it as a no-op
-				// because validation has already established the operand stack
-				// contract.
+				if err := e.exitLabel(); err != nil {
+					return nil, e.instructionError(err)
+				}
 				continue
 			}
 			results, err := e.popResults(e.ft.Results)
@@ -1189,6 +1248,75 @@ func (e *executor) callInstructionError(err error) error {
 		return err
 	}
 	return e.instructionError(err)
+}
+
+// enterLabel pushes the runtime label metadata for the structured-control
+// opener at pc.
+func (e *executor) enterLabel(pc int) error {
+	label, ok := e.fn.labels[pc]
+	if !ok {
+		return fmt.Errorf("control label at %d not found", pc)
+	}
+	height := len(e.stack) - label.paramArity
+	if height < 0 {
+		return fmt.Errorf("control label at %d needs %d params", pc, label.paramArity)
+	}
+	e.labels = append(e.labels, runtimeLabel{
+		height:      height,
+		resultArity: label.resultArity,
+		branchArity: label.branchArity,
+		isLoop:      label.isLoop,
+	})
+	return nil
+}
+
+// exitLabel closes the current structured-control label on normal fallthrough.
+func (e *executor) exitLabel() error {
+	if len(e.labels) <= 1 {
+		return fmt.Errorf("control label stack underflow")
+	}
+	label := e.labels[len(e.labels)-1]
+	if err := e.normalizeLabelValues(label.height, label.resultArity); err != nil {
+		return err
+	}
+	e.labels = e.labels[:len(e.labels)-1]
+	return nil
+}
+
+// branchTo applies the operand-stack and label-stack effects of a branch.
+func (e *executor) branchTo(depth uint32, targetPC int) error {
+	if int(depth) >= len(e.labels) {
+		return fmt.Errorf("branch depth %d out of range", depth)
+	}
+	targetIndex := len(e.labels) - 1 - int(depth)
+	target := e.labels[targetIndex]
+	if err := e.normalizeLabelValues(target.height, target.branchArity); err != nil {
+		return err
+	}
+	if target.isLoop {
+		e.labels = e.labels[:targetIndex+1]
+	} else if targetIndex == 0 {
+		e.labels = e.labels[:1]
+	} else {
+		e.labels = e.labels[:targetIndex]
+	}
+	e.pc = targetPC
+	return nil
+}
+
+// normalizeLabelValues moves the top arity values to height, discarding
+// temporary operands produced inside the label.
+func (e *executor) normalizeLabelValues(height int, arity int) error {
+	if arity > len(e.stack) {
+		return fmt.Errorf("operand stack underflow")
+	}
+	values := append([]Value(nil), e.stack[len(e.stack)-arity:]...)
+	if height > len(e.stack)-arity {
+		return fmt.Errorf("label stack height %d above branch values", height)
+	}
+	e.stack = e.stack[:height]
+	e.stack = append(e.stack, values...)
+	return nil
 }
 
 // push appends v to the operand stack.

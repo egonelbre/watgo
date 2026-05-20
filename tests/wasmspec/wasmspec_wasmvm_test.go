@@ -34,10 +34,6 @@ var wasmSpecWasmvmDeniedScripts = []string{
 	"scripts/annotations.wast",
 	"scripts/binary-leb128.wast",
 	"scripts/binary.wast",
-	"scripts/br.wast",
-	"scripts/br_if.wast",
-	"scripts/br_on_null.wast",
-	"scripts/br_table.wast",
 	"scripts/bulk-memory/bulk.wast",
 	"scripts/bulk-memory/table_copy.wast",
 	"scripts/bulk-memory/table_init.wast",
@@ -49,7 +45,6 @@ var wasmSpecWasmvmDeniedScripts = []string{
 	"scripts/inline-module.wast",
 	"scripts/instance.wast",
 	"scripts/linking.wast",
-	"scripts/loop.wast",
 	"scripts/ref_func.wast",
 	"scripts/return_call.wast",
 	"scripts/return_call_indirect.wast",
@@ -89,13 +84,10 @@ var wasmSpecWasmvmDeniedScripts = []string{
 	"scripts/simd/simd_store64_lane.wast",
 	"scripts/simd/simd_store8_lane.wast",
 	"scripts/skip-stack-guard-page.wast",
-	"scripts/switch.wast",
 	"scripts/table.wast",
 	"scripts/table_grow.wast",
-	"scripts/token.wast",
 	"scripts/type-equivalence.wast",
 	"scripts/type-rec.wast",
-	"scripts/unwind.wast",
 }
 
 type wasmSpecWasmvmRunner struct {
