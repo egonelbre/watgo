@@ -1914,6 +1914,53 @@ func TestExportedGlobalValue(t *testing.T) {
 	}
 }
 
+// TestGlobalImportSharesExportedGlobal checks that an exported global can be
+// imported into another instance and remains shared.
+func TestGlobalImportSharesExportedGlobal(t *testing.T) {
+	rt := wasmvm.NewRuntime()
+	exporter, err := rt.Instantiate(parseWAT(t, `
+		(module
+			(global $g (export "g") (mut i32) (i32.const 7))
+			(func (export "set") (param i32)
+				local.get 0
+				global.set $g))
+	`), nil)
+	if err != nil {
+		t.Fatalf("Instantiate exporter failed: %v", err)
+	}
+	global, ok := exporter.ExportedGlobal("g")
+	if !ok {
+		t.Fatal("missing g export")
+	}
+
+	importer, err := rt.Instantiate(parseWAT(t, `
+		(module
+			(import "env" "g" (global $g (mut i32)))
+			(func (export "get") (result i32)
+				global.get $g)
+			(func (export "set") (param i32)
+				local.get 0
+				global.set $g))
+	`), wasmvm.Imports{"env": {"g": global}})
+	if err != nil {
+		t.Fatalf("Instantiate importer failed: %v", err)
+	}
+
+	results := callExport(t, importer, "get")
+	if len(results) != 1 || results[0] != wasmvm.I32(7) {
+		t.Fatalf("importer get got results %#v, want i32 7", results)
+	}
+	callExport(t, exporter, "set", wasmvm.I32(11))
+	results = callExport(t, importer, "get")
+	if len(results) != 1 || results[0] != wasmvm.I32(11) {
+		t.Fatalf("importer get after exporter set got results %#v, want i32 11", results)
+	}
+	callExport(t, importer, "set", wasmvm.I32(23))
+	if got, err := global.Value(); err != nil || got != wasmvm.I32(23) {
+		t.Fatalf("exported global after importer set = %#v, %v; want i32 23, nil", got, err)
+	}
+}
+
 func TestGlobalInitializerReadsEarlierImmutableGlobal(t *testing.T) {
 	// Global initializer expressions can read earlier immutable globals and use
 	// the numeric constant-expression operators currently supported by wasmvm.

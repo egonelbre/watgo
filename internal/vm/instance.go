@@ -21,7 +21,7 @@ const (
 type Instance struct {
 	m        *wasmir.Module
 	funcs    []funcInst
-	globals  []globalInst
+	globals  []*Global
 	memories []*Memory
 	tables   []tableInst
 	data     []dataInst
@@ -43,8 +43,8 @@ type funcInst struct {
 	code *function
 }
 
-// globalInst is one instantiated global in the module's global index space.
-type globalInst struct {
+// Global is one instantiated global in the module's global index space.
+type Global struct {
 	// typ is the validated value type of value. It is kept here so global.set
 	// can check writes without looking back into the source module.
 	typ wasmir.ValueType
@@ -54,6 +54,41 @@ type globalInst struct {
 
 	// value is the current runtime value stored in this global.
 	value Value
+}
+
+// NewGlobal creates a VM global instance with an initial value.
+func NewGlobal(typ wasmir.ValueType, mutable bool, value Value) (*Global, error) {
+	if err := checkResults([]wasmir.ValueType{typ}, []Value{value}); err != nil {
+		return nil, err
+	}
+	return &Global{typ: typ, mutable: mutable, value: value}, nil
+}
+
+// Type returns the value type stored in g.
+func (g *Global) Type() wasmir.ValueType {
+	return g.typ
+}
+
+// Mutable reports whether global.set can update g.
+func (g *Global) Mutable() bool {
+	return g.mutable
+}
+
+// Value returns the current value stored in g.
+func (g *Global) Value() Value {
+	return g.value
+}
+
+// Set updates g after checking mutability and value type.
+func (g *Global) Set(value Value) error {
+	if !g.mutable {
+		return fmt.Errorf("global is immutable")
+	}
+	if err := checkArgs([]wasmir.ValueType{g.typ}, []Value{value}); err != nil {
+		return err
+	}
+	g.value = value
+	return nil
 }
 
 // Memory is one instantiated linear memory in the module's memory index space.
@@ -214,6 +249,14 @@ func (inst *Instance) GlobalValue(index uint32) (Value, error) {
 	return inst.globalGetValue(index)
 }
 
+// Global returns the instantiated global at index.
+func (inst *Instance) Global(index uint32) (*Global, error) {
+	if int(index) >= len(inst.globals) {
+		return nil, fmt.Errorf("global index %d out of range", index)
+	}
+	return inst.globals[index], nil
+}
+
 // FuncType returns the signature of the function at index.
 func (inst *Instance) FuncType(index uint32) (wasmir.TypeDef, error) {
 	if int(index) >= len(inst.funcs) {
@@ -265,16 +308,42 @@ func (inst *Instance) buildFuncs() error {
 func (inst *Instance) buildGlobals() error {
 	for i, g := range inst.m.Globals {
 		if g.ImportModule != "" || g.ImportName != "" {
-			return fmt.Errorf("unsupported global import %q.%q", g.ImportModule, g.ImportName)
+			if inst.resolver == nil {
+				return fmt.Errorf("resolver is nil")
+			}
+			global, err := inst.resolver.Global(uint32(i), g)
+			if err != nil {
+				return fmt.Errorf("global[%d]: %w", i, err)
+			}
+			if err := checkImportedGlobal(g, global); err != nil {
+				return fmt.Errorf("global[%d]: %w", i, err)
+			}
+			inst.globals = append(inst.globals, global)
+			continue
 		}
 		value, err := inst.evalConstExpr(g.Init, true)
 		if err != nil {
 			return fmt.Errorf("global[%d]: %w", i, err)
 		}
-		if err := checkResults([]wasmir.ValueType{g.Type}, []Value{value}); err != nil {
+		global, err := NewGlobal(g.Type, g.Mutable, value)
+		if err != nil {
 			return fmt.Errorf("global[%d]: initializer type mismatch: %w", i, err)
 		}
-		inst.globals = append(inst.globals, globalInst{typ: g.Type, mutable: g.Mutable, value: value})
+		inst.globals = append(inst.globals, global)
+	}
+	return nil
+}
+
+// checkImportedGlobal verifies that global satisfies the imported global type.
+func checkImportedGlobal(def wasmir.Global, global *Global) error {
+	if global == nil {
+		return fmt.Errorf("import resolved to nil global")
+	}
+	if !runtimeTypeMatches(global.typ, def.Type) {
+		return fmt.Errorf("type mismatch: got %s, want %s", global.typ, def.Type)
+	}
+	if global.mutable != def.Mutable {
+		return fmt.Errorf("mutability mismatch")
 	}
 	return nil
 }
@@ -636,29 +705,28 @@ func (inst *Instance) globalGetValue(index uint32) (Value, error) {
 
 // globalGet returns the current value of the global at index.
 func (inst *Instance) globalGet(index uint32, constExpr bool) (Value, error) {
-	if int(index) >= len(inst.globals) {
-		return Value{}, fmt.Errorf("global index %d out of range", index)
+	g, err := inst.Global(index)
+	if err != nil {
+		return Value{}, err
 	}
-	g := inst.globals[index]
 	if constExpr && g.mutable {
 		return Value{}, fmt.Errorf("global %d is mutable", index)
 	}
-	return g.value, nil
+	return g.Value(), nil
 }
 
 // globalSet updates the global at index with value.
 func (inst *Instance) globalSet(index uint32, value Value) error {
-	if int(index) >= len(inst.globals) {
-		return fmt.Errorf("global index %d out of range", index)
+	g, err := inst.Global(index)
+	if err != nil {
+		return err
 	}
-	g := &inst.globals[index]
 	if !g.mutable {
 		return fmt.Errorf("global %d is immutable", index)
 	}
-	if err := checkArgs([]wasmir.ValueType{g.typ}, []Value{value}); err != nil {
+	if err := g.Set(value); err != nil {
 		return fmt.Errorf("global.set %d: %w", index, err)
 	}
-	g.value = value
 	return nil
 }
 

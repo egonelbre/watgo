@@ -130,6 +130,9 @@ type Resolver interface {
 
 	// Memory resolves an imported memory in the module's memory index space.
 	Memory(index uint32, def wasmir.Memory) (*Memory, error)
+
+	// Global resolves an imported global in the module's global index space.
+	Global(index uint32, def wasmir.Global) (*Global, error)
 }
 
 // checkArgs verifies call argument count and value types.

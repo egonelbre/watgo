@@ -8,7 +8,8 @@
 // Instantiate builds an Instance from a validated wasmir.Module.
 // Instance.CallFunc dispatches function-index calls, and Instance.FuncType
 // exposes signatures needed by wasmvm. Resolver is the only bridge back to
-// wasmvm; it is used for imported function calls and host-shared memories.
+// wasmvm; it is used for imported function calls and host-shared globals and
+// memories.
 //
 // A wasm-to-wasm call re-enters Instance.CallFunc and creates another executor
 // frame. A wasm-to-host call goes through Resolver.CallFunc:

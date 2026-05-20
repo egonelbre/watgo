@@ -47,7 +47,6 @@ var wasmSpecWasmvmDeniedScripts = []string{
 	"scripts/elem.wast",
 	"scripts/fac.wast",
 	"scripts/func.wast",
-	"scripts/global.wast",
 	"scripts/imports.wast",
 	"scripts/inline-module.wast",
 	"scripts/instance.wast",
@@ -204,6 +203,10 @@ func wasmSpecWasmvmSpectestImports() wasmvm.Imports {
 			"print_f64":     wasmSpecWasmvmHostFunc([]wasmir.ValueType{wasmir.ValueTypeF64}),
 			"print_i32_f32": wasmSpecWasmvmHostFunc([]wasmir.ValueType{wasmir.ValueTypeI32, wasmir.ValueTypeF32}),
 			"print_f64_f64": wasmSpecWasmvmHostFunc([]wasmir.ValueType{wasmir.ValueTypeF64, wasmir.ValueTypeF64}),
+			"global_i32":    wasmSpecWasmvmGlobal(wasmvm.I32(666)),
+			"global_i64":    wasmSpecWasmvmGlobal(wasmvm.I64(666)),
+			"global_f32":    wasmSpecWasmvmGlobal(wasmvm.F32(666.6)),
+			"global_f64":    wasmSpecWasmvmGlobal(wasmvm.F64(666.6)),
 		},
 	}
 }
@@ -214,6 +217,15 @@ func wasmSpecWasmvmHostFunc(params []wasmir.ValueType) wasmvm.HostFunc {
 	return wasmvm.NewHostFunc(params, nil, func(ctx *wasmvm.Context, args []wasmvm.Value) ([]wasmvm.Value, error) {
 		return nil, nil
 	})
+}
+
+// wasmSpecWasmvmGlobal returns an immutable spectest global.
+func wasmSpecWasmvmGlobal(value wasmvm.Value) *wasmvm.Global {
+	global, err := wasmvm.NewGlobal(value, false)
+	if err != nil {
+		panic(err)
+	}
+	return global
 }
 
 // runWasmSpecWasmvmScript executes parsed wasmspec commands through wasmvm.
@@ -306,6 +318,7 @@ func (r *wasmSpecWasmvmRunner) runModule(res *commandResult, cmd scriptCommand) 
 	if cmd.moduleName != "" {
 		r.moduleAlias[cmd.moduleName] = runtimeName
 	}
+	r.bindGlobalExports(runtimeName, inst, m)
 	r.bindMemoryExports(runtimeName, inst, m)
 	res.status = true
 }
@@ -341,6 +354,24 @@ func (r *wasmSpecWasmvmRunner) runRegister(res *commandResult, cmd scriptCommand
 		r.currentRuntimeName = cmd.registerName
 	}
 	res.status = true
+}
+
+// bindGlobalExports exposes global exports under runtimeName for later global
+// imports in the same spec script.
+func (r *wasmSpecWasmvmRunner) bindGlobalExports(runtimeName string, inst *wasmvm.ModuleInstance, m *wasmir.Module) {
+	for _, exp := range m.Exports {
+		if exp.Kind != wasmir.ExternalKindGlobal {
+			continue
+		}
+		global, ok := inst.ExportedGlobal(exp.Name)
+		if !ok {
+			continue
+		}
+		if r.imports[runtimeName] == nil {
+			r.imports[runtimeName] = map[string]wasmvm.Extern{}
+		}
+		r.imports[runtimeName][exp.Name] = global
+	}
 }
 
 // bindMemoryExports exposes memory exports under runtimeName for later memory

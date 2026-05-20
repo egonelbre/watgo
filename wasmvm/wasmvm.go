@@ -2,9 +2,9 @@
 // modules.
 //
 // The package can instantiate an already-validated wasmir.Module, look up
-// exported functions and memories, call functions with runtime values, satisfy
-// WebAssembly function imports with Go callbacks, and share exported memories
-// with later instantiations.
+// exported functions, globals, and memories, call functions with runtime
+// values, satisfy WebAssembly function imports with Go callbacks, and share
+// exported globals and memories with later instantiations.
 package wasmvm
 
 import (
@@ -83,7 +83,8 @@ type Imports map[string]map[string]Extern
 
 // Extern is a runtime object supplied for a module import.
 //
-// HostFunc and *Memory are the currently supported Extern implementations.
+// HostFunc, *Global, and *Memory are the currently supported Extern
+// implementations.
 type Extern interface {
 	isExtern()
 }
@@ -133,6 +134,15 @@ func (Memory) isExtern() {}
 // Size returns the current memory size in WebAssembly pages.
 func (m *Memory) Size() uint64 {
 	return m.mem.Size()
+}
+
+// NewGlobal returns an instantiated WebAssembly global for use as an import.
+func NewGlobal(value Value, mutable bool) (*Global, error) {
+	global, err := vm.NewGlobal(value.Type, mutable, value)
+	if err != nil {
+		return nil, err
+	}
+	return &Global{global: global}, nil
 }
 
 // Context is passed to host functions during a WebAssembly call.
@@ -201,10 +211,11 @@ func (rt *Runtime) Instantiate(m *wasmir.Module, imports Imports) (*ModuleInstan
 			}
 			inst.exports[exp.Name] = &Func{inst: inst, index: exp.Index}
 		case wasmir.ExternalKindGlobal:
-			if _, err := inst.vm.GlobalValue(exp.Index); err != nil {
+			global, err := inst.vm.Global(exp.Index)
+			if err != nil {
 				return nil, fmt.Errorf("export %q: global index %d out of range", exp.Name, exp.Index)
 			}
-			inst.globals[exp.Name] = &Global{inst: inst, index: exp.Index}
+			inst.globals[exp.Name] = &Global{global: global}
 		case wasmir.ExternalKindMemory:
 			mem, err := inst.vm.Memory(exp.Index)
 			if err != nil {
@@ -261,15 +272,32 @@ func (inst *ModuleInstance) ExportedMemory(name string) (*Memory, bool) {
 	return m, ok
 }
 
-// Global is a readable WebAssembly global exported from a ModuleInstance.
+// Global is an instantiated WebAssembly global.
 type Global struct {
-	inst  *ModuleInstance
-	index uint32
+	global *vm.Global
+}
+
+// isExtern marks Global as a valid import object.
+func (Global) isExtern() {}
+
+// Type returns the value type stored in g.
+func (g *Global) Type() wasmir.ValueType {
+	return g.global.Type()
+}
+
+// Mutable reports whether g can be updated.
+func (g *Global) Mutable() bool {
+	return g.global.Mutable()
 }
 
 // Value returns the current value stored in g.
 func (g *Global) Value() (Value, error) {
-	return g.inst.vm.GlobalValue(g.index)
+	return g.global.Value(), nil
+}
+
+// Set updates g after checking mutability and value type.
+func (g *Global) Set(value Value) error {
+	return g.global.Set(value)
 }
 
 // Func is a callable WebAssembly function exported from a ModuleInstance.
@@ -335,6 +363,29 @@ func resolveMemoryImport(imports Imports, def wasmir.Memory) (*Memory, error) {
 	}
 }
 
+// resolveGlobalImport finds the host global supplied for a global import.
+func resolveGlobalImport(imports Imports, def wasmir.Global) (*Global, error) {
+	fields, ok := imports[def.ImportModule]
+	if !ok {
+		return nil, fmt.Errorf("missing import module %q", def.ImportModule)
+	}
+	ext, ok := fields[def.ImportName]
+	if !ok {
+		return nil, fmt.Errorf("missing import %q.%q", def.ImportModule, def.ImportName)
+	}
+	switch global := ext.(type) {
+	case Global:
+		return &global, nil
+	case *Global:
+		if global == nil {
+			return nil, fmt.Errorf("import %q.%q is nil", def.ImportModule, def.ImportName)
+		}
+		return global, nil
+	default:
+		return nil, fmt.Errorf("import %q.%q is not a global", def.ImportModule, def.ImportName)
+	}
+}
+
 // resolveHostFunc finds the Go callback supplied for a function import.
 func resolveHostFunc(imports Imports, imp wasmir.Import) (HostFunc, error) {
 	fields, ok := imports[imp.Module]
@@ -393,4 +444,13 @@ func (r vmResolver) Memory(index uint32, def wasmir.Memory) (*vm.Memory, error) 
 		return nil, err
 	}
 	return mem.mem, nil
+}
+
+// Global resolves an imported global for the internal VM.
+func (r vmResolver) Global(index uint32, def wasmir.Global) (*vm.Global, error) {
+	global, err := resolveGlobalImport(r.inst.imports, def)
+	if err != nil {
+		return nil, err
+	}
+	return global.global, nil
 }
