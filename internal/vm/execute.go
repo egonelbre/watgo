@@ -2,6 +2,7 @@ package vm
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"math/bits"
@@ -1023,25 +1024,25 @@ func (e *executor) run() ([]Value, error) {
 		case wasmir.InstrCall:
 			results, err := e.callFunction(ins.index)
 			if err != nil {
-				return nil, e.instructionError(err)
+				return nil, e.callInstructionError(err)
 			}
 			e.stack = append(e.stack, results...)
 		case wasmir.InstrCallIndirect:
 			results, err := e.callIndirectFunction(ins.index, uint32(ins.bits))
 			if err != nil {
-				return nil, e.instructionError(err)
+				return nil, e.callInstructionError(err)
 			}
 			e.stack = append(e.stack, results...)
 		case wasmir.InstrCallRef:
 			results, err := e.callRefFunction(ins.index)
 			if err != nil {
-				return nil, e.instructionError(err)
+				return nil, e.callInstructionError(err)
 			}
 			e.stack = append(e.stack, results...)
 		case wasmir.InstrReturnCall:
 			results, err := e.callFunction(ins.index)
 			if err != nil {
-				return nil, e.instructionError(err)
+				return nil, e.callInstructionError(err)
 			}
 			if err := checkResults(e.ft.Results, results); err != nil {
 				return nil, e.instructionError(err)
@@ -1050,7 +1051,7 @@ func (e *executor) run() ([]Value, error) {
 		case wasmir.InstrReturnCallIndirect:
 			results, err := e.callIndirectFunction(ins.index, uint32(ins.bits))
 			if err != nil {
-				return nil, e.instructionError(err)
+				return nil, e.callInstructionError(err)
 			}
 			if err := checkResults(e.ft.Results, results); err != nil {
 				return nil, e.instructionError(err)
@@ -1059,7 +1060,7 @@ func (e *executor) run() ([]Value, error) {
 		case wasmir.InstrReturnCallRef:
 			results, err := e.callRefFunction(ins.index)
 			if err != nil {
-				return nil, e.instructionError(err)
+				return nil, e.callInstructionError(err)
 			}
 			if err := checkResults(e.ft.Results, results); err != nil {
 				return nil, e.instructionError(err)
@@ -1179,6 +1180,15 @@ func zeroValue(vt wasmir.ValueType) (Value, error) {
 // instructionError wraps err with the current program counter and opcode.
 func (e *executor) instructionError(err error) error {
 	return instructionErrorAt(e.pc, e.fn.code[e.pc].kind, err)
+}
+
+// callInstructionError keeps call-stack exhaustion compact while annotating
+// ordinary call failures with the current call instruction.
+func (e *executor) callInstructionError(err error) error {
+	if errors.Is(err, errCallStackExhausted) {
+		return err
+	}
+	return e.instructionError(err)
 }
 
 // push appends v to the operand stack.

@@ -2,6 +2,7 @@ package vm
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"slices"
@@ -12,10 +13,17 @@ import (
 const (
 	wasmPageSize = 64 * 1024
 
+	// maxCallDepth is the VM's finite abstract call-stack resource. The wasm
+	// spec requires unbounded recursion to exhaust in finite time instead of
+	// depending on the host language stack limit.
+	maxCallDepth = 10000
+
 	// maxWasm32MemoryPages is the architectural wasm32 memory limit. A memory
 	// without an explicit max is still bounded by the 32-bit address space.
 	maxWasm32MemoryPages = 65536
 )
+
+var errCallStackExhausted = errors.New("call stack exhausted")
 
 // Instance is the VM-owned execution state for one instantiated module.
 type Instance struct {
@@ -27,6 +35,11 @@ type Instance struct {
 	data     []dataInst
 	elems    []elemInst
 	resolver Resolver
+
+	// callDepth counts active WebAssembly calls in this instance. It is used
+	// to turn runaway recursion into a regular VM error before the Go runtime
+	// stack overflows.
+	callDepth int
 }
 
 type funcInst struct {
@@ -228,20 +241,43 @@ func (inst *Instance) CallFunc(index uint32, args []Value) ([]Value, error) {
 	if err := checkArgs(ft.Params, args); err != nil {
 		return nil, fmt.Errorf("func[%d]: %w", index, err)
 	}
+	if err := inst.enterCall(); err != nil {
+		return nil, err
+	}
 	if fn.imported {
 		if inst.resolver == nil {
+			inst.exitCall()
 			return nil, fmt.Errorf("resolver is nil")
 		}
 		results, err := inst.resolver.CallFunc(index, args)
 		if err != nil {
+			inst.exitCall()
 			return nil, err
 		}
+		inst.exitCall()
 		if err := checkResults(ft.Results, results); err != nil {
 			return nil, fmt.Errorf("func[%d]: %w", index, err)
 		}
 		return results, nil
 	}
-	return executeFunction(fn.code, ft, args, inst)
+	results, err := executeFunction(fn.code, ft, args, inst)
+	inst.exitCall()
+	return results, err
+}
+
+// enterCall records a new active function call and reports stack exhaustion
+// when the instance reaches its finite call-depth limit.
+func (inst *Instance) enterCall() error {
+	if inst.callDepth >= maxCallDepth {
+		return errCallStackExhausted
+	}
+	inst.callDepth++
+	return nil
+}
+
+// exitCall records that one active function call has completed.
+func (inst *Instance) exitCall() {
+	inst.callDepth--
 }
 
 // GlobalValue returns the current value of the global at index.

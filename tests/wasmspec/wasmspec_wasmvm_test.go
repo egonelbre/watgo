@@ -41,7 +41,6 @@ var wasmSpecWasmvmDeniedScripts = []string{
 	"scripts/bulk-memory/bulk.wast",
 	"scripts/bulk-memory/table_copy.wast",
 	"scripts/bulk-memory/table_init.wast",
-	"scripts/call.wast",
 	"scripts/call_indirect.wast",
 	"scripts/data.wast",
 	"scripts/elem.wast",
