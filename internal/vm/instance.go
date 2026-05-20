@@ -31,7 +31,7 @@ type Instance struct {
 	funcs    []funcInst
 	globals  []*Global
 	memories []*Memory
-	tables   []tableInst
+	tables   []*Table
 	data     []dataInst
 	elems    []elemInst
 	resolver Resolver
@@ -144,8 +144,8 @@ func (mem *Memory) Size() uint64 {
 	return uint64(len(mem.data) / wasmPageSize)
 }
 
-// tableInst is one instantiated table in the module's table index space.
-type tableInst struct {
+// Table is one instantiated table in the module's table index space.
+type Table struct {
 	// addressType is the validated index type for this table. The VM currently
 	// supports only i32-indexed tables.
 	addressType wasmir.ValueType
@@ -158,6 +158,44 @@ type tableInst struct {
 
 	// elems is the mutable table storage.
 	elems []Value
+}
+
+// NewTable creates a VM table instance for the validated table definition t.
+func NewTable(t wasmir.Table) (*Table, error) {
+	if t.AddressType != wasmir.ValueTypeI32 {
+		return nil, fmt.Errorf("unsupported table address type %s", t.AddressType)
+	}
+	if t.Min > uint64(int(^uint(0)>>1)) {
+		return nil, fmt.Errorf("minimum size is too large")
+	}
+	init, err := zeroTableValue(t.RefType)
+	if err != nil {
+		return nil, err
+	}
+	return newTable(t, init)
+}
+
+// AddressType returns the index operand type used by table instructions.
+func (t *Table) AddressType() wasmir.ValueType {
+	return t.addressType
+}
+
+// RefType returns the reference type stored in table elements.
+func (t *Table) RefType() wasmir.ValueType {
+	return t.refType
+}
+
+// Size returns the current table size in elements.
+func (t *Table) Size() uint64 {
+	return uint64(len(t.elems))
+}
+
+// maxElements returns the effective table element limit.
+func (t *Table) maxElements() uint64 {
+	if t.max != nil {
+		return *t.max
+	}
+	return uint64(int(^uint(0) >> 1))
 }
 
 // dataInst is one instantiated data segment in the module's data index space.
@@ -431,28 +469,48 @@ func checkImportedMemory(def wasmir.Memory, mem *Memory) error {
 func (inst *Instance) buildTables() error {
 	for i, t := range inst.m.Tables {
 		if t.ImportModule != "" || t.ImportName != "" {
-			return fmt.Errorf("unsupported table import %q.%q", t.ImportModule, t.ImportName)
-		}
-		if t.AddressType != wasmir.ValueTypeI32 {
-			return fmt.Errorf("table[%d]: unsupported address type %s", i, t.AddressType)
-		}
-		if t.Min > uint64(int(^uint(0)>>1)) {
-			return fmt.Errorf("table[%d]: minimum size is too large", i)
+			if inst.resolver == nil {
+				return fmt.Errorf("resolver is nil")
+			}
+			table, err := inst.resolver.Table(uint32(i), t)
+			if err != nil {
+				return fmt.Errorf("table[%d]: %w", i, err)
+			}
+			if err := checkImportedTable(t, table); err != nil {
+				return fmt.Errorf("table[%d]: %w", i, err)
+			}
+			inst.tables = append(inst.tables, table)
+			continue
 		}
 		init, err := inst.tableInitialValue(t)
 		if err != nil {
 			return fmt.Errorf("table[%d]: %w", i, err)
 		}
-		elems := make([]Value, int(t.Min))
-		for j := range elems {
-			elems[j] = init
+		table, err := newTable(t, init)
+		if err != nil {
+			return fmt.Errorf("table[%d]: %w", i, err)
 		}
-		inst.tables = append(inst.tables, tableInst{
-			addressType: t.AddressType,
-			refType:     t.RefType,
-			max:         t.Max,
-			elems:       elems,
-		})
+		inst.tables = append(inst.tables, table)
+	}
+	return nil
+}
+
+// checkImportedTable verifies that table satisfies the imported table type.
+func checkImportedTable(def wasmir.Table, table *Table) error {
+	if table == nil {
+		return fmt.Errorf("import resolved to nil table")
+	}
+	if table.addressType != def.AddressType {
+		return fmt.Errorf("address type mismatch: got %s, want %s", table.addressType, def.AddressType)
+	}
+	if !runtimeTypeMatches(table.refType, def.RefType) {
+		return fmt.Errorf("element type mismatch: got %s, want %s", table.refType, def.RefType)
+	}
+	if table.Size() < def.Min {
+		return fmt.Errorf("minimum size mismatch: got %d elements, want at least %d", table.Size(), def.Min)
+	}
+	if def.Max != nil && table.maxElements() > *def.Max {
+		return fmt.Errorf("maximum size mismatch: got %d elements, want at most %d", table.maxElements(), *def.Max)
 	}
 	return nil
 }
@@ -460,10 +518,7 @@ func (inst *Instance) buildTables() error {
 // tableInitialValue returns the value used to initialize every slot of table t.
 func (inst *Instance) tableInitialValue(t wasmir.Table) (Value, error) {
 	if len(t.Init) == 0 {
-		if !t.RefType.Nullable {
-			return Value{}, fmt.Errorf("non-nullable table requires initializer")
-		}
-		return Value{Type: t.RefType, Ref: Reference{Kind: RefKindNull}}, nil
+		return zeroTableValue(t.RefType)
 	}
 	value, err := inst.evalConstExpr(t.Init, true)
 	if err != nil {
@@ -601,7 +656,7 @@ func (inst *Instance) elementSegmentValues(seg wasmir.ElementSegment) ([]Value, 
 			if _, err := inst.FuncType(funcIndex); err != nil {
 				return nil, err
 			}
-			values[i] = Value{Type: wasmir.RefTypeFunc(false), Ref: Reference{Kind: RefKindFunc, FuncIndex: funcIndex}}
+			values[i] = Value{Type: wasmir.RefTypeFunc(false), Ref: Reference{Kind: RefKindFunc, FuncIndex: funcIndex, funcInst: inst}}
 		}
 		return values, nil
 	}
@@ -645,7 +700,7 @@ func (inst *Instance) evalConstExpr(init []wasmir.Instruction, constExpr bool) (
 			if _, err := inst.FuncType(ins.FuncIndex); err != nil {
 				return Value{}, fmt.Errorf("initializer instruction %d: %w", pc, err)
 			}
-			stack = append(stack, Value{Type: wasmir.RefTypeFunc(false), Ref: Reference{Kind: RefKindFunc, FuncIndex: ins.FuncIndex}})
+			stack = append(stack, Value{Type: wasmir.RefTypeFunc(false), Ref: Reference{Kind: RefKindFunc, FuncIndex: ins.FuncIndex, funcInst: inst}})
 		case wasmir.InstrGlobalGet:
 			if inst == nil {
 				return Value{}, fmt.Errorf("initializer instruction %d: instance is nil", pc)
@@ -854,6 +909,41 @@ func (mem *Memory) maxPages() uint64 {
 	return uint64(int(^uint(0)>>1)) / wasmPageSize
 }
 
+// zeroTableValue returns the default null value for a nullable table type.
+func zeroTableValue(refType wasmir.ValueType) (Value, error) {
+	if !refType.IsRef() {
+		return Value{}, fmt.Errorf("table element type %s is not a reference type", refType)
+	}
+	if !refType.Nullable {
+		return Value{}, fmt.Errorf("non-nullable table requires initializer")
+	}
+	return Value{Type: refType, Ref: Reference{Kind: RefKindNull}}, nil
+}
+
+// newTable creates an initialized table instance after the initial value is
+// known.
+func newTable(t wasmir.Table, init Value) (*Table, error) {
+	if t.AddressType != wasmir.ValueTypeI32 {
+		return nil, fmt.Errorf("unsupported table address type %s", t.AddressType)
+	}
+	if t.Min > uint64(int(^uint(0)>>1)) {
+		return nil, fmt.Errorf("minimum size is too large")
+	}
+	if err := checkResults([]wasmir.ValueType{t.RefType}, []Value{init}); err != nil {
+		return nil, fmt.Errorf("initializer type mismatch: %w", err)
+	}
+	elems := make([]Value, int(t.Min))
+	for j := range elems {
+		elems[j] = init
+	}
+	return &Table{
+		addressType: t.AddressType,
+		refType:     t.RefType,
+		max:         t.Max,
+		elems:       elems,
+	}, nil
+}
+
 // memoryCopy copies bytes between instantiated memories.
 func (inst *Instance) memoryCopy(dstIndex uint32, dstAddress uint64, srcIndex uint32, srcAddress uint64, size uint64) error {
 	dst, err := inst.memory(dstIndex, dstAddress, size)
@@ -960,7 +1050,7 @@ func (inst *Instance) tableGrow(index uint32, init Value, delta uint64) (uint64,
 		return oldSize, false, nil
 	}
 	newSize := oldSize + delta
-	if table.max != nil && newSize > *table.max {
+	if newSize > table.maxElements() {
 		return oldSize, false, nil
 	}
 	if newSize > uint64(int(^uint(0)>>1)) {
@@ -1015,7 +1105,10 @@ func (inst *Instance) tableInit(tableIndex uint32, elemIndex uint32, dstElemInde
 		return err
 	}
 	if elem.dropped {
-		return fmt.Errorf("element segment %d is dropped", elemIndex)
+		if size == 0 {
+			return nil
+		}
+		return fmt.Errorf("element segment out of bounds")
 	}
 	if srcOffset > uint64(len(elem.values)) || size > uint64(len(elem.values))-srcOffset {
 		return fmt.Errorf("element segment access out of bounds")
@@ -1066,6 +1159,14 @@ func (inst *Instance) Memory(index uint32) (*Memory, error) {
 	return inst.memories[index], nil
 }
 
+// Table returns the instantiated table at index.
+func (inst *Instance) Table(index uint32) (*Table, error) {
+	if int(index) >= len(inst.tables) {
+		return nil, fmt.Errorf("table index %d out of range", index)
+	}
+	return inst.tables[index], nil
+}
+
 // memoryInst resolves a memory index to the mutable instantiated memory state.
 func (inst *Instance) memoryInst(index uint32) (*Memory, error) {
 	return inst.Memory(index)
@@ -1081,11 +1182,8 @@ func (inst *Instance) memoryAddressType(index uint32) (wasmir.ValueType, error) 
 }
 
 // tableInst resolves a table index to the mutable instantiated table state.
-func (inst *Instance) tableInst(index uint32) (*tableInst, error) {
-	if int(index) >= len(inst.tables) {
-		return nil, fmt.Errorf("table index %d out of range", index)
-	}
-	return &inst.tables[index], nil
+func (inst *Instance) tableInst(index uint32) (*Table, error) {
+	return inst.Table(index)
 }
 
 // table returns the in-bounds element window addressed by a VM table operation.

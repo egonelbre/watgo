@@ -77,13 +77,14 @@ func ExternRef(id uint64) Value {
 //
 // For an import such as (import "env" "inc" (func ...)), the corresponding
 // Go value belongs at imports["env"]["inc"]. Function imports should be a
-// HostFunc created with NewHostFunc. Memory imports should be a *Memory
-// obtained from another instantiated module's ExportedMemory method.
+// *HostFunc created with NewHostFunc. Memory and table imports should be
+// *Memory and *Table values created by this package or obtained from another
+// instantiated module's exported resources.
 type Imports map[string]map[string]Extern
 
 // Extern is a runtime object supplied for a module import.
 //
-// HostFunc, *Global, and *Memory are the currently supported Extern
+// *HostFunc, *Global, *Memory, and *Table are the currently supported Extern
 // implementations.
 type Extern interface {
 	isExtern()
@@ -110,8 +111,8 @@ type HostFunc struct {
 	Func func(ctx *Context, args []Value) ([]Value, error)
 }
 
-// isExtern marks HostFunc as a valid import object.
-func (HostFunc) isExtern() {}
+// isExtern marks HostFunc pointers as valid import objects.
+func (*HostFunc) isExtern() {}
 
 // NewHostFunc returns a HostFunc with the given WebAssembly signature and Go
 // callback.
@@ -128,12 +129,43 @@ type Memory struct {
 	mem *vm.Memory
 }
 
-// isExtern marks Memory as a valid import object.
-func (Memory) isExtern() {}
+// isExtern marks Memory pointers as valid import objects.
+func (*Memory) isExtern() {}
+
+// NewMemory returns an instantiated WebAssembly memory for use as an import.
+func NewMemory(def wasmir.Memory) (*Memory, error) {
+	mem, err := vm.NewMemory(def)
+	if err != nil {
+		return nil, err
+	}
+	return &Memory{mem: mem}, nil
+}
 
 // Size returns the current memory size in WebAssembly pages.
 func (m *Memory) Size() uint64 {
 	return m.mem.Size()
+}
+
+// Table is an instantiated WebAssembly table exposed for imports.
+type Table struct {
+	table *vm.Table
+}
+
+// isExtern marks Table pointers as valid import objects.
+func (*Table) isExtern() {}
+
+// NewTable returns an instantiated WebAssembly table for use as an import.
+func NewTable(def wasmir.Table) (*Table, error) {
+	table, err := vm.NewTable(def)
+	if err != nil {
+		return nil, err
+	}
+	return &Table{table: table}, nil
+}
+
+// Size returns the current table size in elements.
+func (t *Table) Size() uint64 {
+	return t.table.Size()
 }
 
 // NewGlobal returns an instantiated WebAssembly global for use as an import.
@@ -195,6 +227,7 @@ func (rt *Runtime) Instantiate(m *wasmir.Module, imports Imports) (*ModuleInstan
 		exports:  make(map[string]*Func),
 		globals:  make(map[string]*Global),
 		memories: make(map[string]*Memory),
+		tables:   make(map[string]*Table),
 		imports:  imports,
 	}
 	vmInst, err := vm.Instantiate(m, vmResolver{inst: inst})
@@ -222,6 +255,12 @@ func (rt *Runtime) Instantiate(m *wasmir.Module, imports Imports) (*ModuleInstan
 				return nil, fmt.Errorf("export %q: memory index %d out of range", exp.Name, exp.Index)
 			}
 			inst.memories[exp.Name] = &Memory{mem: mem}
+		case wasmir.ExternalKindTable:
+			table, err := inst.vm.Table(exp.Index)
+			if err != nil {
+				return nil, fmt.Errorf("export %q: table index %d out of range", exp.Name, exp.Index)
+			}
+			inst.tables[exp.Name] = &Table{table: table}
 		}
 	}
 	return inst, nil
@@ -239,6 +278,7 @@ type ModuleInstance struct {
 	exports  map[string]*Func
 	globals  map[string]*Global
 	memories map[string]*Memory
+	tables   map[string]*Table
 	imports  Imports
 }
 
@@ -272,13 +312,23 @@ func (inst *ModuleInstance) ExportedMemory(name string) (*Memory, bool) {
 	return m, ok
 }
 
+// ExportedTable returns the exported table with the given name.
+//
+// The returned boolean is false when name is not exported as a table. The
+// returned Table is bound to this ModuleInstance and can be supplied as an
+// import to another instantiation.
+func (inst *ModuleInstance) ExportedTable(name string) (*Table, bool) {
+	t, ok := inst.tables[name]
+	return t, ok
+}
+
 // Global is an instantiated WebAssembly global.
 type Global struct {
 	global *vm.Global
 }
 
-// isExtern marks Global as a valid import object.
-func (Global) isExtern() {}
+// isExtern marks Global pointers as valid import objects.
+func (*Global) isExtern() {}
 
 // Type returns the value type stored in g.
 func (g *Global) Type() wasmir.ValueType {
@@ -361,6 +411,27 @@ func resolveMemoryImport(imports Imports, def wasmir.Memory) (*Memory, error) {
 	}
 }
 
+// resolveTableImport finds the host table supplied for a table import.
+func resolveTableImport(imports Imports, def wasmir.Table) (*Table, error) {
+	fields, ok := imports[def.ImportModule]
+	if !ok {
+		return nil, fmt.Errorf("missing import module %q", def.ImportModule)
+	}
+	ext, ok := fields[def.ImportName]
+	if !ok {
+		return nil, fmt.Errorf("missing import %q.%q", def.ImportModule, def.ImportName)
+	}
+	switch table := ext.(type) {
+	case *Table:
+		if table == nil {
+			return nil, fmt.Errorf("import %q.%q is nil", def.ImportModule, def.ImportName)
+		}
+		return table, nil
+	default:
+		return nil, fmt.Errorf("import %q.%q is not a table", def.ImportModule, def.ImportName)
+	}
+}
+
 // resolveGlobalImport finds the host global supplied for a global import.
 func resolveGlobalImport(imports Imports, def wasmir.Global) (*Global, error) {
 	fields, ok := imports[def.ImportModule]
@@ -438,6 +509,15 @@ func (r vmResolver) Memory(index uint32, def wasmir.Memory) (*vm.Memory, error) 
 		return nil, err
 	}
 	return mem.mem, nil
+}
+
+// Table resolves an imported table for the internal VM.
+func (r vmResolver) Table(index uint32, def wasmir.Table) (*vm.Table, error) {
+	table, err := resolveTableImport(r.inst.imports, def)
+	if err != nil {
+		return nil, err
+	}
+	return table.table, nil
 }
 
 // Global resolves an imported global for the internal VM.

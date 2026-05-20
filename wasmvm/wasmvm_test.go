@@ -318,6 +318,53 @@ func TestTableBasics(t *testing.T) {
 	}
 }
 
+// TestSharedTableImportExport checks the public table import/export API and
+// cross-module function references in a shared table.
+func TestSharedTableImportExport(t *testing.T) {
+	rt := wasmvm.NewRuntime()
+
+	owner, err := rt.Instantiate(parseWAT(t, `
+		(module
+			(type $out-i32 (func (result i32)))
+			(table (export "shared-table") 3 funcref)
+			(func (export "call-1") (result i32)
+				i32.const 1
+				call_indirect (type $out-i32)))
+	`), nil)
+	if err != nil {
+		t.Fatalf("Instantiate owner failed: %v", err)
+	}
+	sharedTable, ok := owner.ExportedTable("shared-table")
+	if !ok {
+		t.Fatal("missing shared-table export")
+	}
+	if got, want := sharedTable.Size(), uint64(3); got != want {
+		t.Fatalf("shared table size got %d, want %d", got, want)
+	}
+
+	writer, err := rt.Instantiate(parseWAT(t, `
+		(module
+			(type $out-i32 (func (result i32)))
+			(import "owner" "shared-table" (table 3 funcref))
+			(elem (i32.const 1) $answer)
+			(func $answer (type $out-i32)
+				i32.const 42))
+	`), wasmvm.Imports{
+		"owner": {
+			"shared-table": sharedTable,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Instantiate writer failed: %v", err)
+	}
+	_ = writer
+
+	results := callExport(t, owner, "call-1")
+	if len(results) != 1 || results[0] != wasmvm.I32(42) {
+		t.Fatalf("call-1 got results %#v, want i32 42", results)
+	}
+}
+
 // TestTableGrowFillCopy checks table.grow failure/success behavior and the
 // bulk table.fill/table.copy operations over reference values.
 func TestTableGrowFillCopy(t *testing.T) {
@@ -431,7 +478,7 @@ func TestPassiveElementSegments(t *testing.T) {
 	if err == nil {
 		t.Fatal("Call init after elem.drop succeeded unexpectedly")
 	}
-	if got, want := err.Error(), "pc 3 table.init: element segment 0 is dropped"; got != want {
+	if got, want := err.Error(), "pc 3 table.init: element segment out of bounds"; got != want {
 		t.Fatalf("error = %q, want %q", got, want)
 	}
 }

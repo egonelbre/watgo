@@ -115,8 +115,11 @@ type Reference struct {
 	// Kind identifies the concrete reference payload.
 	Kind RefKind
 
-	// FuncIndex is set when Kind is RefKindFunc.
+	// FuncIndex is set when Kind is RefKindFunc. The unexported funcInst field
+	// records the instance that owns the function; this matters when shared
+	// tables carry function references across module instances.
 	FuncIndex uint32
+	funcInst  *Instance
 
 	// ExternID is set when Kind is RefKindExtern. The VM treats this as an
 	// opaque identity token and never interprets it.
@@ -131,6 +134,9 @@ type Resolver interface {
 
 	// Memory resolves an imported memory in the module's memory index space.
 	Memory(index uint32, def wasmir.Memory) (*Memory, error)
+
+	// Table resolves an imported table in the module's table index space.
+	Table(index uint32, def wasmir.Table) (*Table, error)
 
 	// Global resolves an imported global in the module's global index space.
 	Global(index uint32, def wasmir.Global) (*Global, error)
@@ -1013,7 +1019,7 @@ func (e *executor) run() ([]Value, error) {
 			if _, err := e.inst.FuncType(ins.index); err != nil {
 				return nil, e.instructionError(err)
 			}
-			e.push(Value{Type: wasmir.RefTypeFunc(false), Ref: Reference{Kind: RefKindFunc, FuncIndex: ins.index}})
+			e.push(Value{Type: wasmir.RefTypeFunc(false), Ref: Reference{Kind: RefKindFunc, FuncIndex: ins.index, funcInst: e.inst}})
 		case wasmir.InstrRefIsNull:
 			v, err := e.pop()
 			if err != nil {
@@ -1374,10 +1380,10 @@ func (e *executor) callIndirectFunction(tableIndex uint32, callTypeIndex uint32)
 	if ref.Ref.Kind != RefKindFunc {
 		return nil, fmt.Errorf("indirect call to non-function reference")
 	}
-	if err := e.checkFunctionReferenceType(ref.Ref.FuncIndex, callTypeIndex); err != nil {
+	if err := e.checkFunctionReferenceType(ref.Ref, callTypeIndex); err != nil {
 		return nil, err
 	}
-	return e.callFunction(ref.Ref.FuncIndex)
+	return e.callFunctionRef(ref.Ref)
 }
 
 // callRefFunction pops a function reference operand, checks its runtime type,
@@ -1399,15 +1405,15 @@ func (e *executor) callRefFunction(callTypeIndex uint32) ([]Value, error) {
 	if ref.Ref.Kind != RefKindFunc {
 		return nil, fmt.Errorf("call_ref to non-function reference")
 	}
-	if err := e.checkFunctionReferenceType(ref.Ref.FuncIndex, callTypeIndex); err != nil {
+	if err := e.checkFunctionReferenceType(ref.Ref, callTypeIndex); err != nil {
 		return nil, err
 	}
-	return e.callFunction(ref.Ref.FuncIndex)
+	return e.callFunctionRef(ref.Ref)
 }
 
 // checkFunctionReferenceType verifies the runtime type check for a resolved
 // function reference.
-func (e *executor) checkFunctionReferenceType(funcIndex uint32, callTypeIndex uint32) error {
+func (e *executor) checkFunctionReferenceType(ref Reference, callTypeIndex uint32) error {
 	want, err := e.inst.callType(callTypeIndex)
 	if err != nil {
 		return err
@@ -1415,7 +1421,11 @@ func (e *executor) checkFunctionReferenceType(funcIndex uint32, callTypeIndex ui
 	if want.Kind != wasmir.TypeDefKindFunc {
 		return fmt.Errorf("type index %d is not a function type", callTypeIndex)
 	}
-	got, err := e.inst.FuncType(funcIndex)
+	inst := ref.funcInst
+	if inst == nil {
+		inst = e.inst
+	}
+	got, err := inst.FuncType(ref.FuncIndex)
 	if err != nil {
 		return err
 	}
@@ -1423,6 +1433,24 @@ func (e *executor) checkFunctionReferenceType(funcIndex uint32, callTypeIndex ui
 		return fmt.Errorf("indirect call type mismatch")
 	}
 	return nil
+}
+
+// callFunctionRef invokes the function identified by ref in its owning
+// instance.
+func (e *executor) callFunctionRef(ref Reference) ([]Value, error) {
+	inst := ref.funcInst
+	if inst == nil {
+		inst = e.inst
+	}
+	calleeType, err := inst.FuncType(ref.FuncIndex)
+	if err != nil {
+		return nil, err
+	}
+	callArgs, err := e.popArgs(calleeType.Params)
+	if err != nil {
+		return nil, err
+	}
+	return inst.CallFunc(ref.FuncIndex, callArgs)
 }
 
 // evalTypedSelect pops a typed select's operands and returns the selected value
@@ -1464,7 +1492,7 @@ func refsEqual(a Reference, b Reference) bool {
 	case RefKindNull:
 		return true
 	case RefKindFunc:
-		return a.FuncIndex == b.FuncIndex
+		return a.FuncIndex == b.FuncIndex && a.funcInst == b.funcInst
 	case RefKindExtern:
 		return a.ExternID == b.ExternID
 	default:

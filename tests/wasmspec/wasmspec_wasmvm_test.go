@@ -81,8 +81,6 @@ var wasmSpecWasmvmDeniedScripts = []string{
 	"scripts/bulk-memory/bulk.wast",
 	"scripts/bulk-memory/table_copy.wast",
 	"scripts/bulk-memory/table_init.wast",
-	"scripts/data.wast",
-	"scripts/elem.wast",
 	"scripts/imports.wast",
 	"scripts/inline-module.wast",
 	"scripts/instance.wast",
@@ -234,6 +232,8 @@ func wasmSpecWasmvmSpectestImports() wasmvm.Imports {
 			"print_f64":     wasmSpecWasmvmHostFunc([]wasmir.ValueType{wasmir.ValueTypeF64}),
 			"print_i32_f32": wasmSpecWasmvmHostFunc([]wasmir.ValueType{wasmir.ValueTypeI32, wasmir.ValueTypeF32}),
 			"print_f64_f64": wasmSpecWasmvmHostFunc([]wasmir.ValueType{wasmir.ValueTypeF64, wasmir.ValueTypeF64}),
+			"table":         wasmSpecWasmvmTable(wasmir.ValueTypeI32, 10, wasmSpecUint64Ptr(20)),
+			"memory":        wasmSpecWasmvmMemory(wasmir.ValueTypeI32, 1, wasmSpecUint64Ptr(2)),
 			"global_i32":    wasmSpecWasmvmGlobal(wasmvm.I32(666)),
 			"global_i64":    wasmSpecWasmvmGlobal(wasmvm.I64(666)),
 			"global_f32":    wasmSpecWasmvmGlobal(wasmvm.F32(666.6)),
@@ -242,12 +242,40 @@ func wasmSpecWasmvmSpectestImports() wasmvm.Imports {
 	}
 }
 
+// wasmSpecUint64Ptr returns a pointer to v for inline import limits.
+func wasmSpecUint64Ptr(v uint64) *uint64 {
+	return &v
+}
+
 // wasmSpecWasmvmHostFunc returns a no-op host function with params and no
 // results.
 func wasmSpecWasmvmHostFunc(params []wasmir.ValueType) *wasmvm.HostFunc {
 	return wasmvm.NewHostFunc(params, nil, func(ctx *wasmvm.Context, args []wasmvm.Value) ([]wasmvm.Value, error) {
 		return nil, nil
 	})
+}
+
+// wasmSpecWasmvmMemory returns a spectest memory import.
+func wasmSpecWasmvmMemory(addressType wasmir.ValueType, min uint64, max *uint64) *wasmvm.Memory {
+	mem, err := wasmvm.NewMemory(wasmir.Memory{AddressType: addressType, Min: min, Max: max})
+	if err != nil {
+		panic(err)
+	}
+	return mem
+}
+
+// wasmSpecWasmvmTable returns a spectest table import.
+func wasmSpecWasmvmTable(addressType wasmir.ValueType, min uint64, max *uint64) *wasmvm.Table {
+	table, err := wasmvm.NewTable(wasmir.Table{
+		AddressType: addressType,
+		Min:         min,
+		Max:         max,
+		RefType:     wasmir.RefTypeFunc(true),
+	})
+	if err != nil {
+		panic(err)
+	}
+	return table
 }
 
 // wasmSpecWasmvmGlobal returns an immutable spectest global.
@@ -351,6 +379,7 @@ func (r *wasmSpecWasmvmRunner) runModule(res *commandResult, cmd scriptCommand) 
 	}
 	r.bindGlobalExports(runtimeName, inst, m)
 	r.bindMemoryExports(runtimeName, inst, m)
+	r.bindTableExports(runtimeName, inst, m)
 	res.status = true
 }
 
@@ -420,6 +449,24 @@ func (r *wasmSpecWasmvmRunner) bindMemoryExports(runtimeName string, inst *wasmv
 			r.imports[runtimeName] = map[string]wasmvm.Extern{}
 		}
 		r.imports[runtimeName][exp.Name] = mem
+	}
+}
+
+// bindTableExports exposes table exports under runtimeName for later table
+// imports in the same spec script.
+func (r *wasmSpecWasmvmRunner) bindTableExports(runtimeName string, inst *wasmvm.ModuleInstance, m *wasmir.Module) {
+	for _, exp := range m.Exports {
+		if exp.Kind != wasmir.ExternalKindTable {
+			continue
+		}
+		table, ok := inst.ExportedTable(exp.Name)
+		if !ok {
+			continue
+		}
+		if r.imports[runtimeName] == nil {
+			r.imports[runtimeName] = map[string]wasmvm.Extern{}
+		}
+		r.imports[runtimeName][exp.Name] = table
 	}
 }
 
