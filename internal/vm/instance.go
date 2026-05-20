@@ -242,10 +242,10 @@ func Instantiate(m *wasmir.Module, resolver Resolver) (*Instance, error) {
 	if err := inst.buildElementSegments(); err != nil {
 		return nil, err
 	}
-	if err := inst.applyDataSegments(); err != nil {
+	if err := inst.applyElementSegments(); err != nil {
 		return nil, err
 	}
-	if err := inst.applyElementSegments(); err != nil {
+	if err := inst.applyDataSegments(); err != nil {
 		return nil, err
 	}
 	if err := inst.executeStartFunction(); err != nil {

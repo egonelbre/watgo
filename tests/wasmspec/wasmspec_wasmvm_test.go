@@ -65,8 +65,6 @@ var wasmSpecWasmvmDeniedScripts = []string{
 	"scripts/memory64/table_set64.wast",
 	"scripts/memory64/table_size64.wast",
 
-	"scripts/multi-memory/linking0.wast",
-
 	"scripts/relaxed-simd/",
 
 	"scripts/bulk-memory/table_init.wast", // gc-related

@@ -396,6 +396,54 @@ func TestSharedTableImportExport(t *testing.T) {
 	}
 }
 
+// TestActiveElementSegmentsApplyBeforeDataSegments checks that active element
+// segments mutate an imported table before a later active data segment traps
+// during instantiation.
+func TestActiveElementSegmentsApplyBeforeDataSegments(t *testing.T) {
+	rt := wasmvm.NewRuntime()
+
+	owner, err := rt.Instantiate(parseWAT(t, `
+		(module
+			(type $out-i32 (func (result i32)))
+			(table (export "tab") 10 funcref)
+			(func $g (result i32)
+				i32.const 4)
+			(elem (i32.const 2) func $g $g $g $g)
+			(func (export "call") (param i32) (result i32)
+				local.get 0
+				call_indirect (type $out-i32)))
+	`), nil)
+	if err != nil {
+		t.Fatalf("Instantiate owner failed: %v", err)
+	}
+	table, ok := owner.ExportedTable("tab")
+	if !ok {
+		t.Fatal("missing tab export")
+	}
+
+	_, err = rt.Instantiate(parseWAT(t, `
+		(module
+			(import "owner" "tab" (table 10 funcref))
+			(memory 1)
+			(func $f (result i32)
+				i32.const 0)
+			(elem (i32.const 7) func $f)
+			(data (i32.const 0x10000) "x"))
+	`), wasmvm.Imports{
+		"owner": {
+			"tab": table,
+		},
+	})
+	if err == nil {
+		t.Fatal("Instantiate side-effecting module succeeded unexpectedly")
+	}
+
+	results := callExport(t, owner, "call", wasmvm.I32(7))
+	if len(results) != 1 || results[0] != wasmvm.I32(0) {
+		t.Fatalf("call(7) got results %#v, want i32 0", results)
+	}
+}
+
 // TestTableGrowFillCopy checks table.grow failure/success behavior and the
 // bulk table.fill/table.copy operations over reference values.
 func TestTableGrowFillCopy(t *testing.T) {
