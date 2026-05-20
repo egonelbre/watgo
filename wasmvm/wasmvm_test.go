@@ -435,6 +435,37 @@ func TestTableGrowFillCopy(t *testing.T) {
 	}
 }
 
+// TestTableGrowPastI32AddressSpaceFails checks that a grow which would make an
+// i32-indexed table larger than the WebAssembly i32 address space fails without
+// allocating the requested elements.
+func TestTableGrowPastI32AddressSpaceFails(t *testing.T) {
+	rt := wasmvm.NewRuntime()
+	inst, err := rt.Instantiate(parseWAT(t, `
+		(module
+			(table 16 funcref)
+			(func $f)
+			(elem declare func $f)
+			(func (export "grow") (result i32)
+				ref.func $f
+				i32.const -16
+				table.grow)
+			(func (export "size") (result i32)
+				table.size))
+	`), nil)
+	if err != nil {
+		t.Fatalf("Instantiate failed: %v", err)
+	}
+
+	results := callExport(t, inst, "grow")
+	if len(results) != 1 || results[0] != wasmvm.I32(-1) {
+		t.Fatalf("huge grow got results %#v, want i32 -1", results)
+	}
+	results = callExport(t, inst, "size")
+	if len(results) != 1 || results[0] != wasmvm.I32(16) {
+		t.Fatalf("size after failed grow got results %#v, want i32 16", results)
+	}
+}
+
 // TestPassiveElementSegments checks that table.init can copy from a passive
 // element segment and elem.drop makes that segment unavailable afterward.
 func TestPassiveElementSegments(t *testing.T) {

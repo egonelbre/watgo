@@ -1056,6 +1056,9 @@ func (inst *Instance) tableGrow(index uint32, init Value, delta uint64) (uint64,
 	if newSize > table.maxElements() {
 		return oldSize, false, nil
 	}
+	if table.addressType == wasmir.ValueTypeI32 && newSize > uint64(^uint32(0)) {
+		return oldSize, false, nil
+	}
 	if newSize > uint64(int(^uint(0)>>1)) {
 		return oldSize, false, nil
 	}
