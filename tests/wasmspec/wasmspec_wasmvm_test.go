@@ -69,10 +69,7 @@ var wasmSpecWasmvmDeniedScripts = []string{
 
 	"scripts/relaxed-simd/",
 
-	"scripts/bulk-memory/table_init.wast",
-	"scripts/return_call.wast",
-	"scripts/return_call_indirect.wast",
-	"scripts/return_call_ref.wast",
+	"scripts/bulk-memory/table_init.wast", // gc-related
 	"scripts/simd/simd_align.wast",
 	"scripts/simd/simd_const.wast",
 	"scripts/simd/simd_conversions.wast",

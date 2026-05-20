@@ -168,6 +168,20 @@ func checkResults(want []wasmir.ValueType, got []Value) error {
 	return nil
 }
 
+// checkResultTypes verifies that a tail-call target can produce the current
+// function's result types.
+func checkResultTypes(want []wasmir.ValueType, got []wasmir.ValueType) error {
+	if len(got) != len(want) {
+		return fmt.Errorf("got %d results, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if !runtimeTypeMatches(got[i], want[i]) {
+			return fmt.Errorf("result %d has type %s, want %s", i, got[i], want[i])
+		}
+	}
+	return nil
+}
+
 // runtimeTypeMatches checks runtime value compatibility after validation has
 // already enforced the full WebAssembly static typing rules.
 func runtimeTypeMatches(got, want wasmir.ValueType) bool {
@@ -259,6 +273,25 @@ func (e *executor) initLocals(args []Value) error {
 		e.locals = append(e.locals, v)
 	}
 	return nil
+}
+
+// resetForTailCall replaces the current frame contents with a module-defined
+// callee so return_call can run without growing the VM call stack.
+func (e *executor) resetForTailCall(fn *function, ft wasmir.TypeDef, args []Value) error {
+	if fn == nil {
+		return fmt.Errorf("defined function has no compiled code")
+	}
+	e.fn = fn
+	e.ft = ft
+	e.pc = -1
+	e.locals = nil
+	e.stack = e.stack[:0]
+	e.labels = []runtimeLabel{{
+		height:      0,
+		resultArity: len(ft.Results),
+		branchArity: len(ft.Results),
+	}}
+	return e.initLocals(args)
 }
 
 // run interprets fn.code until it reaches return, the final end instruction, or
@@ -1094,30 +1127,30 @@ func (e *executor) run() ([]Value, error) {
 			}
 			e.stack = append(e.stack, results...)
 		case wasmir.InstrReturnCall:
-			results, err := e.callFunction(ins.index)
+			tail, results, err := e.tailCallFunction(ins.index)
 			if err != nil {
 				return nil, e.callInstructionError(err)
 			}
-			if err := checkResults(e.ft.Results, results); err != nil {
-				return nil, e.instructionError(err)
+			if tail {
+				continue
 			}
 			return results, nil
 		case wasmir.InstrReturnCallIndirect:
-			results, err := e.callIndirectFunction(ins.index, uint32(ins.bits))
+			tail, results, err := e.tailCallIndirectFunction(ins.index, uint32(ins.bits))
 			if err != nil {
 				return nil, e.callInstructionError(err)
 			}
-			if err := checkResults(e.ft.Results, results); err != nil {
-				return nil, e.instructionError(err)
+			if tail {
+				continue
 			}
 			return results, nil
 		case wasmir.InstrReturnCallRef:
-			results, err := e.callRefFunction(ins.index)
+			tail, results, err := e.tailCallRefFunction(ins.index)
 			if err != nil {
 				return nil, e.callInstructionError(err)
 			}
-			if err := checkResults(e.ft.Results, results); err != nil {
-				return nil, e.instructionError(err)
+			if tail {
+				continue
 			}
 			return results, nil
 		case wasmir.InstrBr:
@@ -1357,6 +1390,46 @@ func (e *executor) callFunction(index uint32) ([]Value, error) {
 	return e.inst.CallFunc(index, callArgs)
 }
 
+// tailCallFunction pops arguments for index and either reuses this executor
+// frame for a module-defined callee or returns imported-call results directly.
+func (e *executor) tailCallFunction(index uint32) (bool, []Value, error) {
+	if e.inst == nil {
+		return false, nil, fmt.Errorf("instance is nil")
+	}
+	calleeType, err := e.inst.FuncType(index)
+	if err != nil {
+		return false, nil, err
+	}
+	if err := checkResultTypes(e.ft.Results, calleeType.Results); err != nil {
+		return false, nil, err
+	}
+	callArgs, err := e.popArgs(calleeType.Params)
+	if err != nil {
+		return false, nil, err
+	}
+	fn := e.inst.funcs[index]
+	if fn.imported {
+		if e.inst.resolver == nil {
+			return false, nil, fmt.Errorf("resolver is nil")
+		}
+		results, err := e.inst.resolver.CallFunc(index, callArgs)
+		if err != nil {
+			return false, nil, err
+		}
+		if err := checkResults(calleeType.Results, results); err != nil {
+			return false, nil, fmt.Errorf("func[%d]: %w", index, err)
+		}
+		if err := checkResults(e.ft.Results, results); err != nil {
+			return false, nil, err
+		}
+		return false, results, nil
+	}
+	if err := e.resetForTailCall(fn.code, calleeType, callArgs); err != nil {
+		return false, nil, err
+	}
+	return true, nil, nil
+}
+
 // callIndirectFunction resolves a table element to a function reference,
 // checks that its runtime type matches callTypeIndex, and invokes it.
 func (e *executor) callIndirectFunction(tableIndex uint32, callTypeIndex uint32) ([]Value, error) {
@@ -1386,6 +1459,35 @@ func (e *executor) callIndirectFunction(tableIndex uint32, callTypeIndex uint32)
 	return e.callFunctionRef(ref.Ref)
 }
 
+// tailCallIndirectFunction resolves a table element and then performs
+// return_call_indirect using tail-call frame reuse where possible.
+func (e *executor) tailCallIndirectFunction(tableIndex uint32, callTypeIndex uint32) (bool, []Value, error) {
+	if e.inst == nil {
+		return false, nil, fmt.Errorf("instance is nil")
+	}
+	elemIndex, err := e.popI32()
+	if err != nil {
+		return false, nil, err
+	}
+	ref, err := e.inst.tableGet(tableIndex, uint64(uint32(elemIndex)))
+	if err != nil {
+		return false, nil, err
+	}
+	if !ref.Type.IsRef() {
+		return false, nil, fmt.Errorf("call_indirect table element has type %s", ref.Type)
+	}
+	if ref.Ref.Kind == RefKindNull {
+		return false, nil, fmt.Errorf("indirect call to null reference")
+	}
+	if ref.Ref.Kind != RefKindFunc {
+		return false, nil, fmt.Errorf("indirect call to non-function reference")
+	}
+	if err := e.checkFunctionReferenceType(ref.Ref, callTypeIndex); err != nil {
+		return false, nil, err
+	}
+	return e.tailCallFunctionRef(ref.Ref)
+}
+
 // callRefFunction pops a function reference operand, checks its runtime type,
 // and invokes it.
 func (e *executor) callRefFunction(callTypeIndex uint32) ([]Value, error) {
@@ -1409,6 +1511,31 @@ func (e *executor) callRefFunction(callTypeIndex uint32) ([]Value, error) {
 		return nil, err
 	}
 	return e.callFunctionRef(ref.Ref)
+}
+
+// tailCallRefFunction pops a function reference and then performs
+// return_call_ref using tail-call frame reuse where possible.
+func (e *executor) tailCallRefFunction(callTypeIndex uint32) (bool, []Value, error) {
+	if e.inst == nil {
+		return false, nil, fmt.Errorf("instance is nil")
+	}
+	ref, err := e.pop()
+	if err != nil {
+		return false, nil, err
+	}
+	if !ref.Type.IsRef() {
+		return false, nil, fmt.Errorf("call_ref got %s operand", ref.Type)
+	}
+	if ref.Ref.Kind == RefKindNull {
+		return false, nil, fmt.Errorf("call_ref to null reference")
+	}
+	if ref.Ref.Kind != RefKindFunc {
+		return false, nil, fmt.Errorf("call_ref to non-function reference")
+	}
+	if err := e.checkFunctionReferenceType(ref.Ref, callTypeIndex); err != nil {
+		return false, nil, err
+	}
+	return e.tailCallFunctionRef(ref.Ref)
 }
 
 // checkFunctionReferenceType verifies the runtime type check for a resolved
@@ -1451,6 +1578,23 @@ func (e *executor) callFunctionRef(ref Reference) ([]Value, error) {
 		return nil, err
 	}
 	return inst.CallFunc(ref.FuncIndex, callArgs)
+}
+
+// tailCallFunctionRef invokes ref as a tail call, reusing this frame only when
+// the referenced function belongs to the current instance.
+func (e *executor) tailCallFunctionRef(ref Reference) (bool, []Value, error) {
+	inst := ref.funcInst
+	if inst == nil || inst == e.inst {
+		return e.tailCallFunction(ref.FuncIndex)
+	}
+	results, err := e.callFunctionRef(ref)
+	if err != nil {
+		return false, nil, err
+	}
+	if err := checkResults(e.ft.Results, results); err != nil {
+		return false, nil, err
+	}
+	return false, results, nil
 }
 
 // evalTypedSelect pops a typed select's operands and returns the selected value

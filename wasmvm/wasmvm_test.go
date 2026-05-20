@@ -163,6 +163,37 @@ func TestReturnCallHostFunction(t *testing.T) {
 	}
 }
 
+// TestReturnCallDoesNotGrowCallDepth checks that recursive return_call reuses
+// the current VM frame instead of consuming one call-depth slot per iteration.
+func TestReturnCallDoesNotGrowCallDepth(t *testing.T) {
+	rt := wasmvm.NewRuntime()
+	inst, err := rt.Instantiate(parseWAT(t, `
+		(module
+			(func $count (param i64) (result i64)
+				local.get 0
+				i64.eqz
+				if (result i64)
+					local.get 0
+				else
+					local.get 0
+					i64.const 1
+					i64.sub
+					return_call $count
+				end)
+			(func (export "count") (param i64) (result i64)
+				local.get 0
+				return_call $count))
+	`), nil)
+	if err != nil {
+		t.Fatalf("Instantiate failed: %v", err)
+	}
+
+	results := callExport(t, inst, "count", wasmvm.I64(20000))
+	if len(results) != 1 || results[0] != wasmvm.I64(0) {
+		t.Fatalf("count got results %#v, want i64 0", results)
+	}
+}
+
 // TestReferenceInstructions checks the minimal reference instruction set:
 // ref.null, ref.func, and ref.is_null.
 func TestReferenceInstructions(t *testing.T) {
