@@ -69,20 +69,8 @@ var wasmSpecWasmvmDeniedScripts = []string{
 	"scripts/simd/simd_i64x2_extmul_i32x4.wast",
 	"scripts/simd/simd_i8x16_arith2.wast",
 	"scripts/simd/simd_int_to_int_extend.wast",
-	"scripts/simd/simd_lane.wast",
-	"scripts/simd/simd_linking.wast",
-	"scripts/simd/simd_load16_lane.wast",
-	"scripts/simd/simd_load32_lane.wast",
-	"scripts/simd/simd_load64_lane.wast",
-	"scripts/simd/simd_load8_lane.wast",
 	"scripts/simd/simd_load_extend.wast",
 	"scripts/simd/simd_load_zero.wast",
-	"scripts/simd/simd_memory-multi.wast",
-	"scripts/simd/simd_splat.wast",
-	"scripts/simd/simd_store16_lane.wast",
-	"scripts/simd/simd_store32_lane.wast",
-	"scripts/simd/simd_store64_lane.wast",
-	"scripts/simd/simd_store8_lane.wast",
 }
 
 type wasmSpecWasmvmRunner struct {

@@ -554,6 +554,18 @@ func (e *executor) run() ([]Value, error) {
 				return nil, e.instructionError(err)
 			}
 			e.push(Value{Type: wasmir.ValueTypeV128, V128: value})
+		case wasmir.InstrV128Load8Lane, wasmir.InstrV128Load16Lane,
+			wasmir.InstrV128Load32Lane, wasmir.InstrV128Load64Lane:
+			value, err := e.evalV128LoadLane(ins.kind, ins.index)
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			e.push(Value{Type: wasmir.ValueTypeV128, V128: value})
+		case wasmir.InstrV128Store8Lane, wasmir.InstrV128Store16Lane,
+			wasmir.InstrV128Store32Lane, wasmir.InstrV128Store64Lane:
+			if err := e.evalV128StoreLane(ins.kind, ins.index); err != nil {
+				return nil, e.instructionError(err)
+			}
 		case wasmir.InstrMemorySize:
 			if e.inst == nil {
 				return nil, e.instructionError(fmt.Errorf("instance is nil"))
@@ -2348,6 +2360,81 @@ func (e *executor) evalV128LoadSplat(kind wasmir.InstrKind, memoryIndex uint32, 
 	return splatV128(width, raw), nil
 }
 
+// evalV128LoadLane evaluates one SIMD lane-load instruction.
+func (e *executor) evalV128LoadLane(kind wasmir.InstrKind, immediateIndex uint32) ([16]byte, error) {
+	if e.inst == nil {
+		return [16]byte{}, fmt.Errorf("instance is nil")
+	}
+	imm, err := e.laneMemoryImmediate(immediateIndex)
+	if err != nil {
+		return [16]byte{}, err
+	}
+	width := v128LaneMemoryWidth(kind)
+	if width == 0 {
+		return [16]byte{}, fmt.Errorf("unsupported load lane instruction %s", instrName(kind))
+	}
+	laneOffset, err := v128LaneByteOffset(kind, imm.lane, 16/width, width)
+	if err != nil {
+		return [16]byte{}, err
+	}
+	vec, err := e.popV128()
+	if err != nil {
+		return [16]byte{}, err
+	}
+	address, err := e.popMemoryAddress(imm.memoryIndex, imm.offset)
+	if err != nil {
+		return [16]byte{}, err
+	}
+	bytes, err := e.inst.memory(imm.memoryIndex, address, uint64(width))
+	if err != nil {
+		return [16]byte{}, err
+	}
+	copy(vec[laneOffset:laneOffset+width], bytes)
+	return vec, nil
+}
+
+// evalV128StoreLane evaluates one SIMD lane-store instruction.
+func (e *executor) evalV128StoreLane(kind wasmir.InstrKind, immediateIndex uint32) error {
+	if e.inst == nil {
+		return fmt.Errorf("instance is nil")
+	}
+	imm, err := e.laneMemoryImmediate(immediateIndex)
+	if err != nil {
+		return err
+	}
+	width := v128LaneMemoryWidth(kind)
+	if width == 0 {
+		return fmt.Errorf("unsupported store lane instruction %s", instrName(kind))
+	}
+	laneOffset, err := v128LaneByteOffset(kind, imm.lane, 16/width, width)
+	if err != nil {
+		return err
+	}
+	vec, err := e.popV128()
+	if err != nil {
+		return err
+	}
+	address, err := e.popMemoryAddress(imm.memoryIndex, imm.offset)
+	if err != nil {
+		return err
+	}
+	bytes, err := e.inst.memory(imm.memoryIndex, address, uint64(width))
+	if err != nil {
+		return err
+	}
+	copy(bytes, vec[laneOffset:laneOffset+width])
+	return nil
+}
+
+// laneMemoryImmediate returns the pooled immediate for a SIMD lane memory
+// instruction.
+func (e *executor) laneMemoryImmediate(index uint32) (laneMemoryImmediate, error) {
+	if int(index) >= len(e.fn.laneMemories) {
+		return laneMemoryImmediate{}, fmt.Errorf("lane memory immediate index %d out of range", index)
+	}
+	return e.fn.laneMemories[index], nil
+}
+
 // evalV128ExtractLane evaluates one SIMD lane extraction instruction.
 func (e *executor) evalV128ExtractLane(kind wasmir.InstrKind, lane uint32) (Value, error) {
 	vec, err := e.popV128()
@@ -3451,6 +3538,23 @@ func v128LoadSplatWidth(kind wasmir.InstrKind) uint32 {
 	case wasmir.InstrV128Load32Splat:
 		return 4
 	case wasmir.InstrV128Load64Splat:
+		return 8
+	default:
+		return 0
+	}
+}
+
+// v128LaneMemoryWidth returns the byte width copied by a SIMD lane memory
+// instruction.
+func v128LaneMemoryWidth(kind wasmir.InstrKind) uint32 {
+	switch kind {
+	case wasmir.InstrV128Load8Lane, wasmir.InstrV128Store8Lane:
+		return 1
+	case wasmir.InstrV128Load16Lane, wasmir.InstrV128Store16Lane:
+		return 2
+	case wasmir.InstrV128Load32Lane, wasmir.InstrV128Store32Lane:
+		return 4
+	case wasmir.InstrV128Load64Lane, wasmir.InstrV128Store64Lane:
 		return 8
 	default:
 		return 0

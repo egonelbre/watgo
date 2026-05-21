@@ -53,6 +53,19 @@ type function struct {
 	// shuffleLanes stores SIMD shuffle immediates used by i8x16.shuffle. The
 	// instruction stores its shuffleLanes index in instr.index.
 	shuffleLanes [][16]byte
+
+	// laneMemories stores the memory index, offset, and lane immediate used by
+	// SIMD lane-load and lane-store instructions. The instruction stores its
+	// laneMemories index in instr.index.
+	laneMemories []laneMemoryImmediate
+}
+
+// laneMemoryImmediate is the immediate payload for a SIMD lane memory
+// instruction.
+type laneMemoryImmediate struct {
+	memoryIndex uint32
+	offset      uint64
+	lane        uint32
 }
 
 // instr is one instruction in the VM's execution form.
@@ -70,8 +83,9 @@ type instr struct {
 	// index is the resolved index immediate for local.get/set/tee,
 	// global.get/set, call, call_ref, memory and table instructions,
 	// data.drop/elem.drop, br_table's branchTables entry, and ref.null's
-	// refTypes entry. v128.const and i8x16.shuffle use it as a pool entry, and
-	// SIMD lane instructions use it as the lane immediate.
+	// refTypes entry. v128.const, i8x16.shuffle, and SIMD lane memory
+	// instructions use it as a pool entry; SIMD extract/replace instructions
+	// use it as the lane immediate.
 	index uint32
 
 	// bits is the raw immediate payload for constant instructions.
@@ -207,6 +221,16 @@ func compileFunction(m *wasmir.Module, fn *wasmir.Function) (*function, error) {
 			wasmir.InstrV128Load32Splat, wasmir.InstrV128Load64Splat:
 			op.index = ins.MemoryIndex
 			op.bits = int64(ins.MemoryOffset)
+		case wasmir.InstrV128Load8Lane, wasmir.InstrV128Load16Lane,
+			wasmir.InstrV128Load32Lane, wasmir.InstrV128Load64Lane,
+			wasmir.InstrV128Store8Lane, wasmir.InstrV128Store16Lane,
+			wasmir.InstrV128Store32Lane, wasmir.InstrV128Store64Lane:
+			op.index = uint32(len(out.laneMemories))
+			out.laneMemories = append(out.laneMemories, laneMemoryImmediate{
+				memoryIndex: ins.MemoryIndex,
+				offset:      ins.MemoryOffset,
+				lane:        ins.LaneIndex,
+			})
 		case wasmir.InstrBr, wasmir.InstrBrIf, wasmir.InstrBrOnNull, wasmir.InstrBrOnNonNull:
 			target, err := compileBranchTarget(ins.BranchDepth, labelStack, ctrl, finalEnd)
 			if err != nil {

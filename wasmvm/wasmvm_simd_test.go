@@ -108,7 +108,8 @@ func TestV128Splat(t *testing.T) {
 	})
 }
 
-// TestV128MemoryOps checks v128 load/store and load-splat instructions.
+// TestV128MemoryOps checks v128 load/store, load-splat, and lane memory
+// instructions.
 func TestV128MemoryOps(t *testing.T) {
 	rt := wasmvm.NewRuntime()
 	inst, err := rt.Instantiate(parseWAT(t, `
@@ -138,7 +139,21 @@ func TestV128MemoryOps(t *testing.T) {
 				v128.const i32x4 0x11223344 0x55667788 0x99aabbcc 0xddeeff00
 				v128.store
 				i32.const 4
-				v128.load))
+				v128.load)
+			(func (export "load8_lane") (result v128)
+				i32.const 6
+				v128.const i32x4 0x11223344 0x55667788 0x99aabbcc 0xddeeff00
+				v128.load8_lane 10)
+			(func (export "load32_lane") (result v128)
+				i32.const 4
+				v128.const i32x4 0x11223344 0x55667788 0x99aabbcc 0xddeeff00
+				v128.load32_lane 2)
+			(func (export "store16_lane") (result i32)
+				i32.const 24
+				v128.const i32x4 0x11223344 0x55667788 0x99aabbcc 0xddeeff00
+				v128.store16_lane 1
+				i32.const 24
+				i32.load16_u))
 	`), nil)
 	if err != nil {
 		t.Fatalf("Instantiate failed: %v", err)
@@ -164,10 +179,16 @@ func TestV128MemoryOps(t *testing.T) {
 		0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0xce, 0x41,
 		0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0xce, 0x41,
 	})
+	checkV128Export(t, inst, "load8_lane", v128I32x4(0x11223344, 0x55667788, 0x99cebbcc, 0xddeeff00))
+	checkV128Export(t, inst, "load32_lane", v128I32x4(0x11223344, 0x55667788, 0x41ce0000, 0xddeeff00))
 	checkV128Export(t, inst, "store", [16]byte{
 		0x44, 0x33, 0x22, 0x11, 0x88, 0x77, 0x66, 0x55,
 		0xcc, 0xbb, 0xaa, 0x99, 0x00, 0xff, 0xee, 0xdd,
 	})
+	results := callExport(t, inst, "store16_lane")
+	if len(results) != 1 || results[0] != wasmvm.I32(0x1122) {
+		t.Fatalf("store16_lane got results %#v, want %#v", results, wasmvm.I32(0x1122))
+	}
 }
 
 // checkV128Export calls name and verifies that it returns the expected v128.
