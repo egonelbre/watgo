@@ -1563,7 +1563,7 @@ func (e *executor) checkFunctionReferenceType(ref Reference, callTypeIndex uint3
 	if err != nil {
 		return err
 	}
-	if !typeequiv.FuncTypes(inst.m, gotTypeIndex, e.inst.m, callTypeIndex) {
+	if !typeequiv.Types(inst.m, gotTypeIndex, e.inst.m, callTypeIndex) {
 		return fmt.Errorf("indirect call type mismatch")
 	}
 	return nil

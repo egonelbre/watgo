@@ -3,7 +3,7 @@ Immediate TODOs
 
 vm:
 
-* typeequiv needs unit tests and maybe better func names and docs
+* 
 
 Longer-term plans
 -----------------

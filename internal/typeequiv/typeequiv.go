@@ -1,23 +1,43 @@
 // Package typeequiv compares WebAssembly type definitions structurally.
+//
+// WebAssembly type checks often cannot use Go equality on wasmir.TypeDef or
+// wasmir.ValueType values directly. Indexed reference types may use different
+// numeric type indices while still naming structurally equivalent recursive
+// type definitions. For example, two modules can each define:
+//
+//	(type $callback (func (param i32) (result f32)))
+//	(type $user (func (param (ref $callback))))
+//
+// The two $user types are equivalent across modules even though each module's
+// `(ref $callback)` points into a different Module.Types slice. Types compares
+// those graphs by structure, including recursive groups.
+//
+// Recursive groups compare by shape and relative position. If one module has:
+//
+//	(rec
+//	  (type $a (func (param (ref $b))))
+//	  (type $b (func (param (ref $a)))))
+//
+// and another module has the same two-entry cycle with different absolute type
+// indices, corresponding entries are equivalent. Entries at different relative
+// positions in the group are not equivalent.
+//
+// This package is intentionally about equivalence, not subtyping. Validation
+// code layers subtype reachability on top of these predicates when the spec
+// calls for matching rather than exact equivalence.
 package typeequiv
 
 import "github.com/eliben/watgo/wasmir"
 
-// FuncTypes reports whether the two type indices name equivalent function
-// types in their respective modules.
-func FuncTypes(moduleA *wasmir.Module, typeA uint32, moduleB *wasmir.Module, typeB uint32) bool {
-	if moduleA == nil || moduleB == nil || int(typeA) >= len(moduleA.Types) || int(typeB) >= len(moduleB.Types) {
-		return false
-	}
-	if moduleA.Types[typeA].Kind != wasmir.TypeDefKindFunc || moduleB.Types[typeB].Kind != wasmir.TypeDefKindFunc {
-		return false
-	}
-	c := newChecker(moduleA, moduleB)
-	return c.typeIndicesEquivalent(typeA, typeB)
-}
-
 // Types reports whether the two type indices name equivalent type definitions
 // in their respective modules.
+//
+// This accepts any type-definition kind: function, struct, or array. It returns
+// false for missing modules, out-of-range indices, different type-definition
+// kinds, different subtype wrappers, different declared supertypes, or
+// different structural bodies. Use this for call_indirect/call_ref checks,
+// wasm-to-wasm function import linking, validation-time type equivalence, and
+// GC composite type equivalence.
 func Types(moduleA *wasmir.Module, typeA uint32, moduleB *wasmir.Module, typeB uint32) bool {
 	c := newChecker(moduleA, moduleB)
 	return c.typeIndicesEquivalent(typeA, typeB)
@@ -25,6 +45,12 @@ func Types(moduleA *wasmir.Module, typeA uint32, moduleB *wasmir.Module, typeB u
 
 // FuncTypeAndSignature reports whether the function type named by typeIndex in
 // module is equivalent to the explicit parameter and result type lists.
+//
+// This is for host functions, whose public API carries params/results directly
+// rather than a source module and type index. Indexed reference types in params
+// and results are interpreted in module's type index space. It returns false if
+// module is nil, typeIndex is out of range, or typeIndex does not name a
+// function type.
 func FuncTypeAndSignature(module *wasmir.Module, typeIndex uint32, params []wasmir.ValueType, results []wasmir.ValueType) bool {
 	if module == nil || int(typeIndex) >= len(module.Types) || module.Types[typeIndex].Kind != wasmir.TypeDefKindFunc {
 		return false
@@ -36,6 +62,11 @@ func FuncTypeAndSignature(module *wasmir.Module, typeIndex uint32, params []wasm
 
 // FieldTypes reports whether two struct or array field types are equivalent in
 // their respective modules.
+//
+// Field mutability and packed representation must match exactly. For unpacked
+// fields, the field value types are compared structurally, so indexed reference
+// types are resolved against their respective modules. Packed fields carry no
+// value type payload for this comparison once their packed kind matches.
 func FieldTypes(moduleA *wasmir.Module, fieldA wasmir.FieldType, moduleB *wasmir.Module, fieldB wasmir.FieldType) bool {
 	c := newChecker(moduleA, moduleB)
 	return c.fieldTypesEquivalent(fieldA, fieldB)
@@ -43,6 +74,10 @@ func FieldTypes(moduleA *wasmir.Module, fieldA wasmir.FieldType, moduleB *wasmir
 
 // RecGroupInfo returns the recursive group containing idx. Non-grouped types
 // behave like singleton groups.
+//
+// start is the first type index in the group, size is the number of entries in
+// the group, and pos is idx's zero-based position within the group. If m is nil
+// or idx is out of range, the result treats idx as a singleton group.
 func RecGroupInfo(m *wasmir.Module, idx uint32) (start uint32, size uint32, pos uint32) {
 	return recGroupInfo(m, idx)
 }
