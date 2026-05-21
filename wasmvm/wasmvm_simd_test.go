@@ -498,9 +498,36 @@ func TestV128Unary(t *testing.T) {
 			(func (export "convert_s") (result v128)
 				v128.const i32x4 0x00000001 0xffffffff 0x00000000 0x00000003
 				f32x4.convert_i32x4_s)
+			(func (export "extend_i16_high_s") (result v128)
+				v128.const i8x16 1 -2 3 -4 5 -6 7 -8 9 -10 11 -12 13 -14 15 -16
+				i16x8.extend_high_i8x16_s)
+			(func (export "extend_i32_high_u") (result v128)
+				v128.const i16x8 1 2 3 4 -1 -32768 5 6
+				i32x4.extend_high_i16x8_u)
+			(func (export "extend_i64_low_s") (result v128)
+				v128.const i32x4 -1 2 3 4
+				i64x2.extend_low_i32x4_s)
+			(func (export "extadd_i16_s") (result v128)
+				v128.const i8x16 1 -2 3 -4 5 -6 7 -8 9 -10 11 -12 13 -14 15 -16
+				i16x8.extadd_pairwise_i8x16_s)
+			(func (export "extadd_i32_u") (result v128)
+				v128.const i16x8 1 2 3 4 5 6 7 8
+				i32x4.extadd_pairwise_i16x8_u)
+			(func (export "convert_f64_s") (result v128)
+				v128.const i32x4 -1 2 3 4
+				f64x2.convert_low_i32x4_s)
+			(func (export "promote_low") (result v128)
+				v128.const f32x4 1.0 -2.0 3.0 4.0
+				f64x2.promote_low_f32x4)
+			(func (export "demote_zero") (result v128)
+				v128.const f64x2 1.0 -2.0
+				f32x4.demote_f64x2_zero)
 			(func (export "trunc_sat_u") (result v128)
 				v128.const i32x4 0x3fc00000 0x40900000 0xffc00000 0x449a599a
-				i32x4.trunc_sat_f32x4_u))
+				i32x4.trunc_sat_f32x4_u)
+			(func (export "trunc_sat_f64_s") (result v128)
+				v128.const f64x2 -1.5 2.9
+				i32x4.trunc_sat_f64x2_s_zero))
 	`), nil)
 	if err != nil {
 		t.Fatalf("Instantiate failed: %v", err)
@@ -522,7 +549,16 @@ func TestV128Unary(t *testing.T) {
 	checkV128Export(t, inst, "f32_nearest", v128I32x4(0x3f800000, 0xbf800000, 0x40000000, 0xc0000000))
 	checkV128Export(t, inst, "f64_nearest", v128I32x4(0x00000000, 0x40000000, 0x00000000, 0x40000000))
 	checkV128Export(t, inst, "convert_s", v128I32x4(0x3f800000, 0xbf800000, 0x00000000, 0x40400000))
+	checkV128Export(t, inst, "extend_i16_high_s", v128I32x4(0xfff60009, 0xfff4000b, 0xfff2000d, 0xfff0000f))
+	checkV128Export(t, inst, "extend_i32_high_u", v128I32x4(0x0000ffff, 0x00008000, 0x00000005, 0x00000006))
+	checkV128Export(t, inst, "extend_i64_low_s", v128I32x4(0xffffffff, 0xffffffff, 0x00000002, 0x00000000))
+	checkV128Export(t, inst, "extadd_i16_s", v128I32x4(0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff))
+	checkV128Export(t, inst, "extadd_i32_u", v128I32x4(0x00000003, 0x00000007, 0x0000000b, 0x0000000f))
+	checkV128Export(t, inst, "convert_f64_s", v128I32x4(0x00000000, 0xbff00000, 0x00000000, 0x40000000))
+	checkV128Export(t, inst, "promote_low", v128I32x4(0x00000000, 0x3ff00000, 0x00000000, 0xc0000000))
+	checkV128Export(t, inst, "demote_zero", v128I32x4(0x3f800000, 0xc0000000, 0x00000000, 0x00000000))
 	checkV128Export(t, inst, "trunc_sat_u", v128I32x4(0x00000001, 0x00000004, 0x00000000, 0x000004d2))
+	checkV128Export(t, inst, "trunc_sat_f64_s", v128I32x4(0xffffffff, 0x00000002, 0x00000000, 0x00000000))
 
 	scalarChecks := []struct {
 		name string
@@ -569,6 +605,10 @@ func TestV128Binary(t *testing.T) {
 				v128.const i32x4 0x00000000 0x00000001 0x000000fe 0x000000ff
 				v128.const i32x4 0x00000001 0x00000002 0x000000ff 0x000000ff
 				i8x16.avgr_u)
+			(func (export "i8_narrow_s") (result v128)
+				v128.const i16x8 -200 -128 -1 0 1 127 128 300
+				v128.const i16x8 0 1 2 3 4 5 6 7
+				i8x16.narrow_i16x8_s)
 			(func (export "i16_sub_sat_u") (result v128)
 				v128.const i32x4 0x00ffffff 0x0400ffff 0x00000003 0x00000004
 				v128.const i32x4 0x00020001 0xfe000002 0x00000003 0x00000004
@@ -577,10 +617,34 @@ func TestV128Binary(t *testing.T) {
 				v128.const i32x4 0x0000ffff 0x00000002 0x00000003 0x00000004
 				v128.const i32x4 0x00000001 0x0000ffff 0x00000004 0x00000003
 				i16x8.max_u)
+			(func (export "i16_narrow_u") (result v128)
+				v128.const i32x4 -1 0 65535 70000
+				v128.const i32x4 1 2 3 4
+				i16x8.narrow_i32x4_u)
+			(func (export "i16_q15") (result v128)
+				v128.const i16x8 16384 -32768 16384 -16384 0 1 -1 32767
+				v128.const i16x8 16384 -32768 -16384 16384 7 32767 32767 32767
+				i16x8.q15mulr_sat_s)
+			(func (export "i16_extmul_high_s") (result v128)
+				v128.const i8x16 0 0 0 0 0 0 0 0 1 -2 3 -4 5 -6 7 -8
+				v128.const i8x16 0 0 0 0 0 0 0 0 2 3 -4 -5 6 7 -8 -9
+				i16x8.extmul_high_i8x16_s)
 			(func (export "i32_min_s") (result v128)
 				v128.const i32x4 0xffffffff 0x7fffffff 0x00000003 0x80000000
 				v128.const i32x4 0x00000001 0x80000000 0x00000004 0x7fffffff
 				i32x4.min_s)
+			(func (export "i32_extmul_high_u") (result v128)
+				v128.const i16x8 0 0 0 0 5 6 7 8
+				v128.const i16x8 0 0 0 0 9 10 11 12
+				i32x4.extmul_high_i16x8_u)
+			(func (export "i32_dot") (result v128)
+				v128.const i16x8 1 2 3 4 -1 2 -3 -4
+				v128.const i16x8 5 6 7 8 9 10 -11 12
+				i32x4.dot_i16x8_s)
+			(func (export "i64_extmul_low_s") (result v128)
+				v128.const i32x4 -2 3 4 5
+				v128.const i32x4 4 -5 6 7
+				i64x2.extmul_low_i32x4_s)
 			(func (export "vxor") (result v128)
 				v128.const i32x4 0x00ff0001 0x00040002 0x44000003 0x00000004
 				v128.const i32x4 0x00020001 0x00fe0002 0x00000003 0x55000004
@@ -624,9 +688,16 @@ func TestV128Binary(t *testing.T) {
 	checkV128Export(t, inst, "i8_add_sat_s", v128I32x4(0x00000002, 0x0000007f, 0x00000006, 0x00000080))
 	checkV128Export(t, inst, "i8_min_s", v128I32x4(0x00000080, 0x00000080, 0x00000003, 0x000000ff))
 	checkV128Export(t, inst, "i8_avgr_u", v128I32x4(0x00000001, 0x00000002, 0x000000ff, 0x000000ff))
+	checkV128Export(t, inst, "i8_narrow_s", v128I32x4(0x00ff8080, 0x7f7f7f01, 0x03020100, 0x07060504))
 	checkV128Export(t, inst, "i16_sub_sat_u", v128I32x4(0x00fdfffe, 0x0000fffd, 0x00000000, 0x00000000))
 	checkV128Export(t, inst, "i16_max_u", v128I32x4(0x0000ffff, 0x0000ffff, 0x00000004, 0x00000004))
+	checkV128Export(t, inst, "i16_narrow_u", v128I32x4(0x00000000, 0xffffffff, 0x00020001, 0x00040003))
+	checkV128Export(t, inst, "i16_q15", v128I32x4(0x7fff2000, 0xe000e000, 0x00010000, 0x7ffeffff))
+	checkV128Export(t, inst, "i16_extmul_high_s", v128I32x4(0xfffa0002, 0x0014fff4, 0xffd6001e, 0x0048ffc8))
 	checkV128Export(t, inst, "i32_min_s", v128I32x4(0xffffffff, 0x80000000, 0x00000003, 0x80000000))
+	checkV128Export(t, inst, "i32_extmul_high_u", v128I32x4(0x0000002d, 0x0000003c, 0x0000004d, 0x00000060))
+	checkV128Export(t, inst, "i32_dot", v128I32x4(0x00000011, 0x00000035, 0x0000000b, 0xfffffff1))
+	checkV128Export(t, inst, "i64_extmul_low_s", v128I32x4(0xfffffff8, 0xffffffff, 0xfffffff1, 0xffffffff))
 	checkV128Export(t, inst, "vxor", v128I32x4(0x00fd0000, 0x00fa0000, 0x44000000, 0x55000000))
 	checkV128Export(t, inst, "f32_min", v128I32x4(0x80000000, 0x7fc00000, 0x449a5000, 0xbf800000))
 	checkV128Export(t, inst, "f32_pmin", v128I32x4(0x00000000, 0x80000000, 0x40000000, 0x7fc00000))

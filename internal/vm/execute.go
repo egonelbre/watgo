@@ -971,15 +971,26 @@ func (e *executor) run() ([]Value, error) {
 			e.push(Value{Type: wasmir.ValueTypeI32, I32: value})
 		case wasmir.InstrV128Not,
 			wasmir.InstrI8x16Abs, wasmir.InstrI8x16Popcnt, wasmir.InstrI8x16Neg,
+			wasmir.InstrI16x8ExtaddPairwiseI8x16S, wasmir.InstrI16x8ExtaddPairwiseI8x16U,
 			wasmir.InstrI16x8Abs, wasmir.InstrI16x8Neg,
+			wasmir.InstrI16x8ExtendLowI8x16S, wasmir.InstrI16x8ExtendLowI8x16U,
+			wasmir.InstrI16x8ExtendHighI8x16S, wasmir.InstrI16x8ExtendHighI8x16U,
+			wasmir.InstrI32x4ExtaddPairwiseI16x8S, wasmir.InstrI32x4ExtaddPairwiseI16x8U,
 			wasmir.InstrI32x4Abs, wasmir.InstrI32x4Neg,
+			wasmir.InstrI32x4ExtendLowI16x8S, wasmir.InstrI32x4ExtendLowI16x8U,
+			wasmir.InstrI32x4ExtendHighI16x8S, wasmir.InstrI32x4ExtendHighI16x8U,
 			wasmir.InstrI64x2Abs, wasmir.InstrI64x2Neg,
+			wasmir.InstrI64x2ExtendLowI32x4S, wasmir.InstrI64x2ExtendLowI32x4U,
+			wasmir.InstrI64x2ExtendHighI32x4S, wasmir.InstrI64x2ExtendHighI32x4U,
 			wasmir.InstrF32x4Abs, wasmir.InstrF32x4Neg, wasmir.InstrF32x4Sqrt,
 			wasmir.InstrF32x4Ceil, wasmir.InstrF32x4Floor, wasmir.InstrF32x4Trunc, wasmir.InstrF32x4Nearest,
 			wasmir.InstrF64x2Abs, wasmir.InstrF64x2Neg, wasmir.InstrF64x2Sqrt,
 			wasmir.InstrF64x2Ceil, wasmir.InstrF64x2Floor, wasmir.InstrF64x2Trunc, wasmir.InstrF64x2Nearest,
 			wasmir.InstrF32x4ConvertI32x4S, wasmir.InstrF32x4ConvertI32x4U,
-			wasmir.InstrI32x4TruncSatF32x4S, wasmir.InstrI32x4TruncSatF32x4U:
+			wasmir.InstrF64x2ConvertLowI32x4S, wasmir.InstrF64x2ConvertLowI32x4U,
+			wasmir.InstrF32x4DemoteF64x2Zero, wasmir.InstrF64x2PromoteLowF32x4,
+			wasmir.InstrI32x4TruncSatF32x4S, wasmir.InstrI32x4TruncSatF32x4U,
+			wasmir.InstrI32x4TruncSatF64x2SZero, wasmir.InstrI32x4TruncSatF64x2UZero:
 			value, err := e.evalV128Unary(ins.kind)
 			if err != nil {
 				return nil, e.instructionError(err)
@@ -987,15 +998,25 @@ func (e *executor) run() ([]Value, error) {
 			e.push(Value{Type: wasmir.ValueTypeV128, V128: value})
 		case wasmir.InstrI8x16Swizzle,
 			wasmir.InstrV128And, wasmir.InstrV128AndNot, wasmir.InstrV128Or, wasmir.InstrV128Xor,
+			wasmir.InstrI8x16NarrowI16x8S, wasmir.InstrI8x16NarrowI16x8U,
 			wasmir.InstrI8x16Add, wasmir.InstrI8x16AddSatS, wasmir.InstrI8x16AddSatU,
 			wasmir.InstrI8x16Sub, wasmir.InstrI8x16SubSatS, wasmir.InstrI8x16SubSatU,
 			wasmir.InstrI8x16MinS, wasmir.InstrI8x16MinU, wasmir.InstrI8x16MaxS, wasmir.InstrI8x16MaxU, wasmir.InstrI8x16AvgrU,
+			wasmir.InstrI16x8NarrowI32x4S, wasmir.InstrI16x8NarrowI32x4U,
 			wasmir.InstrI16x8Add, wasmir.InstrI16x8AddSatS, wasmir.InstrI16x8AddSatU,
 			wasmir.InstrI16x8Sub, wasmir.InstrI16x8SubSatS, wasmir.InstrI16x8SubSatU, wasmir.InstrI16x8Mul,
 			wasmir.InstrI16x8MinS, wasmir.InstrI16x8MinU, wasmir.InstrI16x8MaxS, wasmir.InstrI16x8MaxU, wasmir.InstrI16x8AvgrU,
+			wasmir.InstrI16x8Q15mulrSatS,
+			wasmir.InstrI16x8ExtmulLowI8x16S, wasmir.InstrI16x8ExtmulHighI8x16S,
+			wasmir.InstrI16x8ExtmulLowI8x16U, wasmir.InstrI16x8ExtmulHighI8x16U,
 			wasmir.InstrI32x4Add, wasmir.InstrI32x4Sub, wasmir.InstrI32x4Mul,
 			wasmir.InstrI32x4MinS, wasmir.InstrI32x4MinU, wasmir.InstrI32x4MaxS, wasmir.InstrI32x4MaxU,
+			wasmir.InstrI32x4DotI16x8S,
+			wasmir.InstrI32x4ExtmulLowI16x8S, wasmir.InstrI32x4ExtmulHighI16x8S,
+			wasmir.InstrI32x4ExtmulLowI16x8U, wasmir.InstrI32x4ExtmulHighI16x8U,
 			wasmir.InstrI64x2Add, wasmir.InstrI64x2Sub, wasmir.InstrI64x2Mul,
+			wasmir.InstrI64x2ExtmulLowI32x4S, wasmir.InstrI64x2ExtmulHighI32x4S,
+			wasmir.InstrI64x2ExtmulLowI32x4U, wasmir.InstrI64x2ExtmulHighI32x4U,
 			wasmir.InstrF32x4Min, wasmir.InstrF32x4Max, wasmir.InstrF32x4Pmin, wasmir.InstrF32x4Pmax,
 			wasmir.InstrF32x4Add, wasmir.InstrF32x4Sub, wasmir.InstrF32x4Div, wasmir.InstrF32x4Mul,
 			wasmir.InstrF64x2Min, wasmir.InstrF64x2Max, wasmir.InstrF64x2Pmin, wasmir.InstrF64x2Pmax,
@@ -2800,18 +2821,31 @@ func (e *executor) evalV128Unary(kind wasmir.InstrKind) ([16]byte, error) {
 		return popcntI8x16(vec), nil
 	case wasmir.InstrI8x16Neg:
 		return negI8x16(vec), nil
+	case wasmir.InstrI16x8ExtaddPairwiseI8x16S, wasmir.InstrI16x8ExtaddPairwiseI8x16U:
+		return extaddPairwiseI8x16ToI16x8(kind, vec), nil
 	case wasmir.InstrI16x8Abs:
 		return absI16x8(vec), nil
 	case wasmir.InstrI16x8Neg:
 		return negI16x8(vec), nil
+	case wasmir.InstrI16x8ExtendLowI8x16S, wasmir.InstrI16x8ExtendLowI8x16U,
+		wasmir.InstrI16x8ExtendHighI8x16S, wasmir.InstrI16x8ExtendHighI8x16U:
+		return extendI8x16ToI16x8(kind, vec), nil
+	case wasmir.InstrI32x4ExtaddPairwiseI16x8S, wasmir.InstrI32x4ExtaddPairwiseI16x8U:
+		return extaddPairwiseI16x8ToI32x4(kind, vec), nil
 	case wasmir.InstrI32x4Abs:
 		return absI32x4(vec), nil
 	case wasmir.InstrI32x4Neg:
 		return negI32x4(vec), nil
+	case wasmir.InstrI32x4ExtendLowI16x8S, wasmir.InstrI32x4ExtendLowI16x8U,
+		wasmir.InstrI32x4ExtendHighI16x8S, wasmir.InstrI32x4ExtendHighI16x8U:
+		return extendI16x8ToI32x4(kind, vec), nil
 	case wasmir.InstrI64x2Abs:
 		return absI64x2(vec), nil
 	case wasmir.InstrI64x2Neg:
 		return negI64x2(vec), nil
+	case wasmir.InstrI64x2ExtendLowI32x4S, wasmir.InstrI64x2ExtendLowI32x4U,
+		wasmir.InstrI64x2ExtendHighI32x4S, wasmir.InstrI64x2ExtendHighI32x4U:
+		return extendI32x4ToI64x2(kind, vec), nil
 	case wasmir.InstrF32x4Abs, wasmir.InstrF32x4Neg, wasmir.InstrF32x4Sqrt,
 		wasmir.InstrF32x4Ceil, wasmir.InstrF32x4Floor, wasmir.InstrF32x4Trunc, wasmir.InstrF32x4Nearest:
 		return unaryF32x4(kind, vec), nil
@@ -2820,8 +2854,16 @@ func (e *executor) evalV128Unary(kind wasmir.InstrKind) ([16]byte, error) {
 		return unaryF64x2(kind, vec), nil
 	case wasmir.InstrF32x4ConvertI32x4S, wasmir.InstrF32x4ConvertI32x4U:
 		return convertI32x4ToF32x4(kind, vec), nil
+	case wasmir.InstrF64x2ConvertLowI32x4S, wasmir.InstrF64x2ConvertLowI32x4U:
+		return convertI32x4ToF64x2(kind, vec), nil
+	case wasmir.InstrF32x4DemoteF64x2Zero:
+		return demoteF64x2ToF32x4Zero(vec), nil
+	case wasmir.InstrF64x2PromoteLowF32x4:
+		return promoteLowF32x4ToF64x2(vec), nil
 	case wasmir.InstrI32x4TruncSatF32x4S, wasmir.InstrI32x4TruncSatF32x4U:
 		return truncSatF32x4ToI32x4(kind, vec), nil
+	case wasmir.InstrI32x4TruncSatF64x2SZero, wasmir.InstrI32x4TruncSatF64x2UZero:
+		return truncSatF64x2ToI32x4Zero(kind, vec), nil
 	default:
 		return [16]byte{}, fmt.Errorf("unsupported SIMD unary instruction %s", instrName(kind))
 	}
@@ -2844,19 +2886,36 @@ func (e *executor) evalV128Binary(kind wasmir.InstrKind) ([16]byte, error) {
 		return swizzleI8x16(lhs, rhs), nil
 	case wasmir.InstrV128And, wasmir.InstrV128AndNot, wasmir.InstrV128Or, wasmir.InstrV128Xor:
 		return bitwiseV128(kind, lhs, rhs), nil
+	case wasmir.InstrI8x16NarrowI16x8S, wasmir.InstrI8x16NarrowI16x8U:
+		return narrowI16x8ToI8x16(kind, lhs, rhs), nil
 	case wasmir.InstrI8x16Add, wasmir.InstrI8x16AddSatS, wasmir.InstrI8x16AddSatU,
 		wasmir.InstrI8x16Sub, wasmir.InstrI8x16SubSatS, wasmir.InstrI8x16SubSatU,
 		wasmir.InstrI8x16MinS, wasmir.InstrI8x16MinU, wasmir.InstrI8x16MaxS, wasmir.InstrI8x16MaxU, wasmir.InstrI8x16AvgrU:
 		return binaryI8x16(kind, lhs, rhs), nil
+	case wasmir.InstrI16x8NarrowI32x4S, wasmir.InstrI16x8NarrowI32x4U:
+		return narrowI32x4ToI16x8(kind, lhs, rhs), nil
 	case wasmir.InstrI16x8Add, wasmir.InstrI16x8AddSatS, wasmir.InstrI16x8AddSatU,
 		wasmir.InstrI16x8Sub, wasmir.InstrI16x8SubSatS, wasmir.InstrI16x8SubSatU, wasmir.InstrI16x8Mul,
 		wasmir.InstrI16x8MinS, wasmir.InstrI16x8MinU, wasmir.InstrI16x8MaxS, wasmir.InstrI16x8MaxU, wasmir.InstrI16x8AvgrU:
 		return binaryI16x8(kind, lhs, rhs), nil
+	case wasmir.InstrI16x8Q15mulrSatS:
+		return q15mulrSatI16x8(lhs, rhs), nil
+	case wasmir.InstrI16x8ExtmulLowI8x16S, wasmir.InstrI16x8ExtmulHighI8x16S,
+		wasmir.InstrI16x8ExtmulLowI8x16U, wasmir.InstrI16x8ExtmulHighI8x16U:
+		return extmulI8x16ToI16x8(kind, lhs, rhs), nil
 	case wasmir.InstrI32x4Add, wasmir.InstrI32x4Sub, wasmir.InstrI32x4Mul,
 		wasmir.InstrI32x4MinS, wasmir.InstrI32x4MinU, wasmir.InstrI32x4MaxS, wasmir.InstrI32x4MaxU:
 		return binaryI32x4(kind, lhs, rhs), nil
+	case wasmir.InstrI32x4DotI16x8S:
+		return dotI16x8ToI32x4(lhs, rhs), nil
+	case wasmir.InstrI32x4ExtmulLowI16x8S, wasmir.InstrI32x4ExtmulHighI16x8S,
+		wasmir.InstrI32x4ExtmulLowI16x8U, wasmir.InstrI32x4ExtmulHighI16x8U:
+		return extmulI16x8ToI32x4(kind, lhs, rhs), nil
 	case wasmir.InstrI64x2Add, wasmir.InstrI64x2Sub, wasmir.InstrI64x2Mul:
 		return binaryI64x2(kind, lhs, rhs), nil
+	case wasmir.InstrI64x2ExtmulLowI32x4S, wasmir.InstrI64x2ExtmulHighI32x4S,
+		wasmir.InstrI64x2ExtmulLowI32x4U, wasmir.InstrI64x2ExtmulHighI32x4U:
+		return extmulI32x4ToI64x2(kind, lhs, rhs), nil
 	case wasmir.InstrF32x4Min, wasmir.InstrF32x4Max, wasmir.InstrF32x4Pmin, wasmir.InstrF32x4Pmax,
 		wasmir.InstrF32x4Add, wasmir.InstrF32x4Sub, wasmir.InstrF32x4Div, wasmir.InstrF32x4Mul:
 		return binaryF32x4(kind, lhs, rhs), nil
@@ -3144,6 +3203,115 @@ func absI64x2(vec [16]byte) [16]byte {
 	return out
 }
 
+// extendI8x16ToI16x8 sign- or zero-extends either half of an i8x16 value to
+// i16x8 lanes.
+func extendI8x16ToI16x8(kind wasmir.InstrKind, vec [16]byte) [16]byte {
+	start := 0
+	if kind == wasmir.InstrI16x8ExtendHighI8x16S || kind == wasmir.InstrI16x8ExtendHighI8x16U {
+		start = 8
+	}
+	signed := kind == wasmir.InstrI16x8ExtendLowI8x16S || kind == wasmir.InstrI16x8ExtendHighI8x16S
+
+	var out [16]byte
+	for lane := 0; lane < 8; lane++ {
+		raw := vec[start+lane]
+		var result uint16
+		if signed {
+			result = uint16(int16(int8(raw)))
+		} else {
+			result = uint16(raw)
+		}
+		binary.LittleEndian.PutUint16(out[lane*2:lane*2+2], result)
+	}
+	return out
+}
+
+// extendI16x8ToI32x4 sign- or zero-extends either half of an i16x8 value to
+// i32x4 lanes.
+func extendI16x8ToI32x4(kind wasmir.InstrKind, vec [16]byte) [16]byte {
+	start := 0
+	if kind == wasmir.InstrI32x4ExtendHighI16x8S || kind == wasmir.InstrI32x4ExtendHighI16x8U {
+		start = 8
+	}
+	signed := kind == wasmir.InstrI32x4ExtendLowI16x8S || kind == wasmir.InstrI32x4ExtendHighI16x8S
+
+	var out [16]byte
+	for lane := 0; lane < 4; lane++ {
+		raw := binary.LittleEndian.Uint16(vec[start+lane*2 : start+lane*2+2])
+		var result uint32
+		if signed {
+			result = uint32(int32(int16(raw)))
+		} else {
+			result = uint32(raw)
+		}
+		binary.LittleEndian.PutUint32(out[lane*4:lane*4+4], result)
+	}
+	return out
+}
+
+// extendI32x4ToI64x2 sign- or zero-extends either half of an i32x4 value to
+// i64x2 lanes.
+func extendI32x4ToI64x2(kind wasmir.InstrKind, vec [16]byte) [16]byte {
+	start := 0
+	if kind == wasmir.InstrI64x2ExtendHighI32x4S || kind == wasmir.InstrI64x2ExtendHighI32x4U {
+		start = 8
+	}
+	signed := kind == wasmir.InstrI64x2ExtendLowI32x4S || kind == wasmir.InstrI64x2ExtendHighI32x4S
+
+	var out [16]byte
+	for lane := 0; lane < 2; lane++ {
+		raw := binary.LittleEndian.Uint32(vec[start+lane*4 : start+lane*4+4])
+		var result uint64
+		if signed {
+			result = uint64(int64(int32(raw)))
+		} else {
+			result = uint64(raw)
+		}
+		binary.LittleEndian.PutUint64(out[lane*8:lane*8+8], result)
+	}
+	return out
+}
+
+// extaddPairwiseI8x16ToI16x8 sign- or zero-extends adjacent i8 lanes and adds
+// each pair into an i16 lane.
+func extaddPairwiseI8x16ToI16x8(kind wasmir.InstrKind, vec [16]byte) [16]byte {
+	signed := kind == wasmir.InstrI16x8ExtaddPairwiseI8x16S
+
+	var out [16]byte
+	for lane := 0; lane < 8; lane++ {
+		a := vec[lane*2]
+		b := vec[lane*2+1]
+		var result uint16
+		if signed {
+			result = uint16(int16(int8(a)) + int16(int8(b)))
+		} else {
+			result = uint16(a) + uint16(b)
+		}
+		binary.LittleEndian.PutUint16(out[lane*2:lane*2+2], result)
+	}
+	return out
+}
+
+// extaddPairwiseI16x8ToI32x4 sign- or zero-extends adjacent i16 lanes and adds
+// each pair into an i32 lane.
+func extaddPairwiseI16x8ToI32x4(kind wasmir.InstrKind, vec [16]byte) [16]byte {
+	signed := kind == wasmir.InstrI32x4ExtaddPairwiseI16x8S
+
+	var out [16]byte
+	for lane := 0; lane < 4; lane++ {
+		a := binary.LittleEndian.Uint16(vec[lane*4 : lane*4+2])
+		b := binary.LittleEndian.Uint16(vec[lane*4+2 : lane*4+4])
+		var result uint32
+		if signed {
+			result = uint32(int32(int16(a)) + int32(int16(b)))
+		} else {
+			result = uint32(a) + uint32(b)
+		}
+		binary.LittleEndian.PutUint32(out[lane*4:lane*4+4], result)
+	}
+	return out
+}
+
 // unaryF32x4 applies one f32x4 unary operation lane-wise.
 func unaryF32x4(kind wasmir.InstrKind, vec [16]byte) [16]byte {
 	var out [16]byte
@@ -3225,6 +3393,44 @@ func convertI32x4ToF32x4(kind wasmir.InstrKind, vec [16]byte) [16]byte {
 	return out
 }
 
+// convertI32x4ToF64x2 converts the low two i32 lanes to f64 lanes.
+func convertI32x4ToF64x2(kind wasmir.InstrKind, vec [16]byte) [16]byte {
+	var out [16]byte
+	for lane := 0; lane < 2; lane++ {
+		raw := binary.LittleEndian.Uint32(vec[lane*4 : lane*4+4])
+		var result float64
+		switch kind {
+		case wasmir.InstrF64x2ConvertLowI32x4S:
+			result = float64(int32(raw))
+		case wasmir.InstrF64x2ConvertLowI32x4U:
+			result = float64(raw)
+		}
+		binary.LittleEndian.PutUint64(out[lane*8:lane*8+8], math.Float64bits(result))
+	}
+	return out
+}
+
+// promoteLowF32x4ToF64x2 promotes the low two f32 lanes to f64 lanes.
+func promoteLowF32x4ToF64x2(vec [16]byte) [16]byte {
+	var out [16]byte
+	for lane := 0; lane < 2; lane++ {
+		raw := binary.LittleEndian.Uint32(vec[lane*4 : lane*4+4])
+		binary.LittleEndian.PutUint64(out[lane*8:lane*8+8], promoteF32BitsToF64Bits(raw))
+	}
+	return out
+}
+
+// demoteF64x2ToF32x4Zero demotes two f64 lanes to the low f32 lanes and writes
+// zero to the high f32 lanes.
+func demoteF64x2ToF32x4Zero(vec [16]byte) [16]byte {
+	var out [16]byte
+	for lane := 0; lane < 2; lane++ {
+		raw := binary.LittleEndian.Uint64(vec[lane*8 : lane*8+8])
+		binary.LittleEndian.PutUint32(out[lane*4:lane*4+4], demoteF64BitsToF32Bits(raw))
+	}
+	return out
+}
+
 // truncSatF32x4ToI32x4 saturating-truncates each f32 lane to an i32 lane.
 func truncSatF32x4ToI32x4(kind wasmir.InstrKind, vec [16]byte) [16]byte {
 	var out [16]byte
@@ -3240,6 +3446,58 @@ func truncSatF32x4ToI32x4(kind wasmir.InstrKind, vec [16]byte) [16]byte {
 		binary.LittleEndian.PutUint32(out[i:i+4], uint32(result))
 	}
 	return out
+}
+
+// truncSatF64x2ToI32x4Zero saturating-truncates two f64 lanes to the low i32
+// lanes and writes zero to the high i32 lanes.
+func truncSatF64x2ToI32x4Zero(kind wasmir.InstrKind, vec [16]byte) [16]byte {
+	var out [16]byte
+	for lane := 0; lane < 2; lane++ {
+		v := math.Float64frombits(binary.LittleEndian.Uint64(vec[lane*8 : lane*8+8]))
+		var result int32
+		switch kind {
+		case wasmir.InstrI32x4TruncSatF64x2SZero:
+			result = truncSatFloatToI32S(v)
+		case wasmir.InstrI32x4TruncSatF64x2UZero:
+			result = truncSatFloatToI32U(v)
+		}
+		binary.LittleEndian.PutUint32(out[lane*4:lane*4+4], uint32(result))
+	}
+	return out
+}
+
+// promoteF32BitsToF64Bits promotes one f32 bit pattern to f64, preserving the
+// spec-level distinction between canonical and arithmetic NaNs.
+func promoteF32BitsToF64Bits(raw uint32) uint64 {
+	if isF32NaNBits(raw) {
+		if raw&0x7fffffff == canonicalF32NaNBits {
+			return canonicalF64NaNBits
+		}
+		return canonicalF64NaNBits | 1
+	}
+	return math.Float64bits(float64(math.Float32frombits(raw)))
+}
+
+// demoteF64BitsToF32Bits demotes one f64 bit pattern to f32, preserving the
+// spec-level distinction between canonical and arithmetic NaNs.
+func demoteF64BitsToF32Bits(raw uint64) uint32 {
+	if isF64NaNBits(raw) {
+		if raw&0x7fffffffffffffff == canonicalF64NaNBits {
+			return canonicalF32NaNBits
+		}
+		return canonicalF32NaNBits | 1
+	}
+	return math.Float32bits(float32(math.Float64frombits(raw)))
+}
+
+// isF32NaNBits reports whether raw is an f32 NaN encoding.
+func isF32NaNBits(raw uint32) bool {
+	return raw&0x7f800000 == 0x7f800000 && raw&0x007fffff != 0
+}
+
+// isF64NaNBits reports whether raw is an f64 NaN encoding.
+func isF64NaNBits(raw uint64) bool {
+	return raw&0x7ff0000000000000 == 0x7ff0000000000000 && raw&0x000fffffffffffff != 0
 }
 
 // swizzleI8x16 rearranges lhs bytes according to rhs byte indices.
@@ -3267,6 +3525,50 @@ func bitwiseV128(kind wasmir.InstrKind, lhs [16]byte, rhs [16]byte) [16]byte {
 		case wasmir.InstrV128Xor:
 			out[i] = lhs[i] ^ rhs[i]
 		}
+	}
+	return out
+}
+
+// narrowI16x8ToI8x16 narrows two i16x8 operands into one i8x16 result with
+// signed or unsigned saturation.
+func narrowI16x8ToI8x16(kind wasmir.InstrKind, lhs [16]byte, rhs [16]byte) [16]byte {
+	var out [16]byte
+	for i := 0; i < 16; i++ {
+		vec := lhs
+		lane := i
+		if i >= 8 {
+			vec = rhs
+			lane = i - 8
+		}
+		raw := int16(binary.LittleEndian.Uint16(vec[lane*2 : lane*2+2]))
+		if kind == wasmir.InstrI8x16NarrowI16x8S {
+			out[i] = byte(int8(clampInt(int(raw), -128, 127)))
+		} else {
+			out[i] = byte(clampInt(int(raw), 0, 255))
+		}
+	}
+	return out
+}
+
+// narrowI32x4ToI16x8 narrows two i32x4 operands into one i16x8 result with
+// signed or unsigned saturation.
+func narrowI32x4ToI16x8(kind wasmir.InstrKind, lhs [16]byte, rhs [16]byte) [16]byte {
+	var out [16]byte
+	for i := 0; i < 8; i++ {
+		vec := lhs
+		lane := i
+		if i >= 4 {
+			vec = rhs
+			lane = i - 4
+		}
+		raw := int32(binary.LittleEndian.Uint32(vec[lane*4 : lane*4+4]))
+		var result uint16
+		if kind == wasmir.InstrI16x8NarrowI32x4S {
+			result = uint16(int16(clampInt64(int64(raw), -32768, 32767)))
+		} else {
+			result = uint16(clampInt64(int64(raw), 0, 65535))
+		}
+		binary.LittleEndian.PutUint16(out[i*2:i*2+2], result)
 	}
 	return out
 }
@@ -3387,6 +3689,109 @@ func binaryI64x2(kind wasmir.InstrKind, lhs [16]byte, rhs [16]byte) [16]byte {
 			result = a * b
 		}
 		binary.LittleEndian.PutUint64(out[i:i+8], result)
+	}
+	return out
+}
+
+// q15mulrSatI16x8 applies signed saturating rounded Q15 multiplication to each
+// i16 lane.
+func q15mulrSatI16x8(lhs [16]byte, rhs [16]byte) [16]byte {
+	var out [16]byte
+	for i := 0; i < len(out); i += 2 {
+		a := int32(int16(binary.LittleEndian.Uint16(lhs[i : i+2])))
+		b := int32(int16(binary.LittleEndian.Uint16(rhs[i : i+2])))
+		result := (a*b + 0x4000) >> 15
+		if result > 32767 {
+			result = 32767
+		}
+		binary.LittleEndian.PutUint16(out[i:i+2], uint16(int16(result)))
+	}
+	return out
+}
+
+// extmulI8x16ToI16x8 multiplies either half of two i8x16 operands into i16x8
+// lanes, using signed or unsigned extension.
+func extmulI8x16ToI16x8(kind wasmir.InstrKind, lhs [16]byte, rhs [16]byte) [16]byte {
+	start := 0
+	if kind == wasmir.InstrI16x8ExtmulHighI8x16S || kind == wasmir.InstrI16x8ExtmulHighI8x16U {
+		start = 8
+	}
+	signed := kind == wasmir.InstrI16x8ExtmulLowI8x16S || kind == wasmir.InstrI16x8ExtmulHighI8x16S
+
+	var out [16]byte
+	for lane := 0; lane < 8; lane++ {
+		a := lhs[start+lane]
+		b := rhs[start+lane]
+		var result uint16
+		if signed {
+			result = uint16(int16(int8(a)) * int16(int8(b)))
+		} else {
+			result = uint16(a) * uint16(b)
+		}
+		binary.LittleEndian.PutUint16(out[lane*2:lane*2+2], result)
+	}
+	return out
+}
+
+// extmulI16x8ToI32x4 multiplies either half of two i16x8 operands into i32x4
+// lanes, using signed or unsigned extension.
+func extmulI16x8ToI32x4(kind wasmir.InstrKind, lhs [16]byte, rhs [16]byte) [16]byte {
+	start := 0
+	if kind == wasmir.InstrI32x4ExtmulHighI16x8S || kind == wasmir.InstrI32x4ExtmulHighI16x8U {
+		start = 8
+	}
+	signed := kind == wasmir.InstrI32x4ExtmulLowI16x8S || kind == wasmir.InstrI32x4ExtmulHighI16x8S
+
+	var out [16]byte
+	for lane := 0; lane < 4; lane++ {
+		a := binary.LittleEndian.Uint16(lhs[start+lane*2 : start+lane*2+2])
+		b := binary.LittleEndian.Uint16(rhs[start+lane*2 : start+lane*2+2])
+		var result uint32
+		if signed {
+			result = uint32(int32(int16(a)) * int32(int16(b)))
+		} else {
+			result = uint32(a) * uint32(b)
+		}
+		binary.LittleEndian.PutUint32(out[lane*4:lane*4+4], result)
+	}
+	return out
+}
+
+// extmulI32x4ToI64x2 multiplies either half of two i32x4 operands into i64x2
+// lanes, using signed or unsigned extension.
+func extmulI32x4ToI64x2(kind wasmir.InstrKind, lhs [16]byte, rhs [16]byte) [16]byte {
+	start := 0
+	if kind == wasmir.InstrI64x2ExtmulHighI32x4S || kind == wasmir.InstrI64x2ExtmulHighI32x4U {
+		start = 8
+	}
+	signed := kind == wasmir.InstrI64x2ExtmulLowI32x4S || kind == wasmir.InstrI64x2ExtmulHighI32x4S
+
+	var out [16]byte
+	for lane := 0; lane < 2; lane++ {
+		a := binary.LittleEndian.Uint32(lhs[start+lane*4 : start+lane*4+4])
+		b := binary.LittleEndian.Uint32(rhs[start+lane*4 : start+lane*4+4])
+		var result uint64
+		if signed {
+			result = uint64(int64(int32(a)) * int64(int32(b)))
+		} else {
+			result = uint64(a) * uint64(b)
+		}
+		binary.LittleEndian.PutUint64(out[lane*8:lane*8+8], result)
+	}
+	return out
+}
+
+// dotI16x8ToI32x4 multiplies adjacent signed i16 lane pairs and sums each pair
+// into one i32 lane.
+func dotI16x8ToI32x4(lhs [16]byte, rhs [16]byte) [16]byte {
+	var out [16]byte
+	for lane := 0; lane < 4; lane++ {
+		i := lane * 4
+		a0 := int32(int16(binary.LittleEndian.Uint16(lhs[i : i+2])))
+		b0 := int32(int16(binary.LittleEndian.Uint16(rhs[i : i+2])))
+		a1 := int32(int16(binary.LittleEndian.Uint16(lhs[i+2 : i+4])))
+		b1 := int32(int16(binary.LittleEndian.Uint16(rhs[i+2 : i+4])))
+		binary.LittleEndian.PutUint32(out[lane*4:lane*4+4], uint32(a0*b0+a1*b1))
 	}
 	return out
 }
@@ -3525,6 +3930,17 @@ func binaryF64(kind wasmir.InstrKind, a float64, b float64) uint64 {
 
 // clampInt clamps v into the inclusive [lo, hi] range.
 func clampInt(v int, lo int, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
+// clampInt64 clamps v into the inclusive [lo, hi] range.
+func clampInt64(v int64, lo int64, hi int64) int64 {
 	if v < lo {
 		return lo
 	}
