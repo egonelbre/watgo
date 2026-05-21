@@ -332,10 +332,19 @@ func (inst *Instance) Global(index uint32) (*Global, error) {
 
 // FuncType returns the signature of the function at index.
 func (inst *Instance) FuncType(index uint32) (wasmir.TypeDef, error) {
-	if int(index) >= len(inst.funcs) {
-		return wasmir.TypeDef{}, fmt.Errorf("call function index %d out of range", index)
+	typeIndex, err := inst.FuncTypeIndex(index)
+	if err != nil {
+		return wasmir.TypeDef{}, err
 	}
-	return inst.funcType(inst.funcs[index].typeIdx)
+	return inst.funcType(typeIndex)
+}
+
+// FuncTypeIndex returns the module type index of the function at index.
+func (inst *Instance) FuncTypeIndex(index uint32) (uint32, error) {
+	if int(index) >= len(inst.funcs) {
+		return 0, fmt.Errorf("call function index %d out of range", index)
+	}
+	return inst.funcs[index].typeIdx, nil
 }
 
 // callType returns the function type referenced by an indirect call type

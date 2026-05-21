@@ -9,8 +9,8 @@ package wasmvm
 
 import (
 	"fmt"
-	"slices"
 
+	"github.com/eliben/watgo/internal/typeequiv"
 	"github.com/eliben/watgo/internal/vm"
 	"github.com/eliben/watgo/wasmir"
 )
@@ -109,6 +109,18 @@ type HostFunc struct {
 	// Value per result. Returning an error aborts the WebAssembly call and
 	// propagates the error to Func.Call.
 	Func func(ctx *Context, args []Value) ([]Value, error)
+
+	// sourceModule is set for callbacks that adapt an exported WebAssembly
+	// function, so import linking can compare indexed reference types against
+	// the exporting module's type graph.
+	sourceModule *wasmir.Module
+
+	// sourceTypeIndex is the function type index in sourceModule.
+	sourceTypeIndex uint32
+
+	// sourceTypeKnown reports whether sourceModule/sourceTypeIndex describe
+	// this host function's original WebAssembly type.
+	sourceTypeKnown bool
 }
 
 // isExtern marks HostFunc pointers as valid import objects.
@@ -222,6 +234,7 @@ func (rt *Runtime) Instantiate(m *wasmir.Module, imports Imports) (*ModuleInstan
 	}
 
 	inst := &ModuleInstance{
+		module:   m,
 		rt:       rt,
 		hosts:    hosts,
 		exports:  make(map[string]*Func),
@@ -272,6 +285,7 @@ func (rt *Runtime) Instantiate(m *wasmir.Module, imports Imports) (*ModuleInstan
 // exported functions. Values returned by ExportedFunc are bound to this
 // instance.
 type ModuleInstance struct {
+	module   *wasmir.Module
 	rt       *Runtime
 	vm       *vm.Instance
 	hosts    []HostFunc
@@ -489,9 +503,16 @@ func exportedFuncHostFunc(fn *Func) (HostFunc, error) {
 	if err != nil {
 		return HostFunc{}, err
 	}
+	typeIndex, err := fn.inst.vm.FuncTypeIndex(fn.index)
+	if err != nil {
+		return HostFunc{}, err
+	}
 	return HostFunc{
-		Params:  ft.Params,
-		Results: ft.Results,
+		Params:          ft.Params,
+		Results:         ft.Results,
+		sourceModule:    fn.inst.module,
+		sourceTypeIndex: typeIndex,
+		sourceTypeKnown: true,
 		Func: func(ctx *Context, args []Value) ([]Value, error) {
 			return fn.Call(args...)
 		},
@@ -504,8 +525,11 @@ func checkHostFuncType(m *wasmir.Module, imp wasmir.Import, host HostFunc) error
 	if int(imp.TypeIdx) >= len(m.Types) || m.Types[imp.TypeIdx].Kind != wasmir.TypeDefKindFunc {
 		return fmt.Errorf("import %q.%q has invalid function type", imp.Module, imp.Name)
 	}
-	ft := m.Types[imp.TypeIdx]
-	if !slices.Equal(host.Params, ft.Params) || !slices.Equal(host.Results, ft.Results) {
+	if host.sourceTypeKnown {
+		if !typeequiv.FuncTypes(host.sourceModule, host.sourceTypeIndex, m, imp.TypeIdx) {
+			return fmt.Errorf("import %q.%q type mismatch", imp.Module, imp.Name)
+		}
+	} else if !typeequiv.FuncTypeAndSignature(m, imp.TypeIdx, host.Params, host.Results) {
 		return fmt.Errorf("import %q.%q type mismatch", imp.Module, imp.Name)
 	}
 	if host.Func == nil {

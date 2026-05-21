@@ -30,6 +30,7 @@ import (
 
 	"github.com/eliben/watgo/diag"
 	"github.com/eliben/watgo/internal/instrdef"
+	"github.com/eliben/watgo/internal/typeequiv"
 	"github.com/eliben/watgo/internal/valhint"
 	"github.com/eliben/watgo/wasmir"
 )
@@ -269,293 +270,10 @@ func isTypeIndexSubtype(m *wasmir.Module, got, want uint32) bool {
 	return false
 }
 
-type typePair struct {
-	a uint32
-	b uint32
-}
-
-type typeEquivalenceChecker struct {
-	// m is the module whose recursive type graph is being compared.
-	m *wasmir.Module
-
-	// groupVisiting tracks recursive-group pairs currently being compared, so
-	// cyclic references inside a rec group can terminate successfully.
-	groupVisiting map[typePair]bool
-
-	// groupMemo caches completed recursive-group equivalence checks.
-	groupMemo map[typePair]bool
-
-	// typeVisiting tracks individual type-entry pairs currently being compared.
-	typeVisiting map[typePair]bool
-
-	// typeMemo caches completed individual type-entry equivalence checks.
-	typeMemo map[typePair]bool
-}
-
-func newTypeEquivalenceChecker(m *wasmir.Module) typeEquivalenceChecker {
-	return typeEquivalenceChecker{
-		m:             m,
-		groupVisiting: make(map[typePair]bool),
-		groupMemo:     make(map[typePair]bool),
-		typeVisiting:  make(map[typePair]bool),
-		typeMemo:      make(map[typePair]bool),
-	}
-}
-
+// typeIndicesEquivalent reports whether two type indices in one module name
+// structurally equivalent type definitions.
 func typeIndicesEquivalent(m *wasmir.Module, a, b uint32) bool {
-	c := newTypeEquivalenceChecker(m)
-	return c.typeIndicesEquivalent(a, b)
-}
-
-func (c *typeEquivalenceChecker) typeIndicesEquivalent(a, b uint32) bool {
-	startA, sizeA, posA := recGroupInfo(c.m, a)
-	startB, sizeB, posB := recGroupInfo(c.m, b)
-	if posA != posB || sizeA != sizeB {
-		return false
-	}
-	if sizeA > 1 {
-		groupKey := typePair{a: startA, b: startB}
-		if eq, ok := c.groupMemo[groupKey]; ok {
-			return eq
-		}
-		if c.groupVisiting[groupKey] {
-			return true
-		}
-		c.groupVisiting[groupKey] = true
-		defer delete(c.groupVisiting, groupKey)
-		for i := uint32(0); i < sizeA; i++ {
-			if !c.typeIndicesEquivalentInGroup(startA, startB, sizeA, startA+i, startB+i) {
-				c.groupMemo[groupKey] = false
-				return false
-			}
-		}
-		c.groupMemo[groupKey] = true
-		return true
-	}
-	return c.typeIndicesEquivalentBody(a, b)
-}
-
-func (c *typeEquivalenceChecker) typeIndicesEquivalentInGroup(groupA, groupB, groupSize, a, b uint32) bool {
-	if a == b && groupA == groupB {
-		return true
-	}
-	if c.m == nil || int(a) >= len(c.m.Types) || int(b) >= len(c.m.Types) {
-		return false
-	}
-	key := typePair{a: a, b: b}
-	if eq, ok := c.typeMemo[key]; ok {
-		return eq
-	}
-	if c.typeVisiting[key] {
-		return true
-	}
-	c.typeVisiting[key] = true
-	defer delete(c.typeVisiting, key)
-
-	ta := c.m.Types[a]
-	tb := c.m.Types[b]
-	if ta.SubType != tb.SubType || ta.Final != tb.Final || ta.Kind != tb.Kind || len(ta.SuperTypes) != len(tb.SuperTypes) {
-		c.typeMemo[key] = false
-		return false
-	}
-	for i := range ta.SuperTypes {
-		if !c.typeIndexRefsEquivalentInGroup(groupA, groupB, groupSize, ta.SuperTypes[i], tb.SuperTypes[i]) {
-			c.typeMemo[key] = false
-			return false
-		}
-	}
-
-	var eq bool
-	switch ta.Kind {
-	case wasmir.TypeDefKindFunc:
-		eq = len(ta.Params) == len(tb.Params) && len(ta.Results) == len(tb.Results)
-		if eq {
-			for i := range ta.Params {
-				if !c.valueTypesEquivalentInRecGroup(ta.Params[i], tb.Params[i], groupA, groupB, groupSize) {
-					eq = false
-					break
-				}
-			}
-		}
-		if eq {
-			for i := range ta.Results {
-				if !c.valueTypesEquivalentInRecGroup(ta.Results[i], tb.Results[i], groupA, groupB, groupSize) {
-					eq = false
-					break
-				}
-			}
-		}
-	case wasmir.TypeDefKindStruct:
-		eq = len(ta.Fields) == len(tb.Fields)
-		if eq {
-			for i := range ta.Fields {
-				if !c.fieldTypesEquivalentInRecGroup(ta.Fields[i], tb.Fields[i], groupA, groupB, groupSize) {
-					eq = false
-					break
-				}
-			}
-		}
-	case wasmir.TypeDefKindArray:
-		eq = c.fieldTypesEquivalentInRecGroup(ta.ElemField, tb.ElemField, groupA, groupB, groupSize)
-	default:
-		eq = false
-	}
-	c.typeMemo[key] = eq
-	return eq
-}
-
-func (c *typeEquivalenceChecker) typeIndexRefsEquivalentInGroup(groupA, groupB, groupSize, a, b uint32) bool {
-	inA := a >= groupA && a < groupA+groupSize
-	inB := b >= groupB && b < groupB+groupSize
-	if inA || inB {
-		if !inA || !inB {
-			return false
-		}
-		if a-groupA != b-groupB {
-			return false
-		}
-		return c.typeIndicesEquivalentInGroup(groupA, groupB, groupSize, a, b)
-	}
-	return c.typeIndicesEquivalent(a, b)
-}
-
-func (c *typeEquivalenceChecker) valueTypesEquivalentInRecGroup(a, b wasmir.ValueType, groupA, groupB, groupSize uint32) bool {
-	if a.Kind != b.Kind {
-		return false
-	}
-	if a.Kind != wasmir.ValueKindRef {
-		return a == b
-	}
-	if a.Nullable != b.Nullable {
-		return false
-	}
-	if a.UsesTypeIndex() && b.UsesTypeIndex() {
-		return c.typeIndexRefsEquivalentInGroup(groupA, groupB, groupSize, a.HeapType.TypeIndex, b.HeapType.TypeIndex)
-	}
-	return a.HeapType.Kind == b.HeapType.Kind
-}
-
-func (c *typeEquivalenceChecker) fieldTypesEquivalentInRecGroup(a, b wasmir.FieldType, groupA, groupB, groupSize uint32) bool {
-	if a.Mutable != b.Mutable || a.Packed != b.Packed {
-		return false
-	}
-	if a.Packed != wasmir.PackedTypeNone {
-		return true
-	}
-	return c.valueTypesEquivalentInRecGroup(a.Type, b.Type, groupA, groupB, groupSize)
-}
-
-// recGroupInfo returns the recursive group containing idx. Non-grouped types
-// behave like singleton groups.
-func recGroupInfo(m *wasmir.Module, idx uint32) (start uint32, size uint32, pos uint32) {
-	if m == nil || int(idx) >= len(m.Types) {
-		return idx, 1, 0
-	}
-	for s := idx; ; {
-		if groupSize := m.Types[s].RecGroupSize; groupSize > 0 && idx < s+groupSize {
-			return s, groupSize, idx - s
-		}
-		if s == 0 {
-			break
-		}
-		s--
-	}
-	return idx, 1, 0
-}
-
-func (c *typeEquivalenceChecker) typeIndicesEquivalentBody(a, b uint32) bool {
-	if a == b {
-		return true
-	}
-	if c.m == nil || int(a) >= len(c.m.Types) || int(b) >= len(c.m.Types) {
-		return false
-	}
-	key := typePair{a: a, b: b}
-	if eq, ok := c.typeMemo[key]; ok {
-		return eq
-	}
-	if c.typeVisiting[key] {
-		return true
-	}
-	c.typeVisiting[key] = true
-	defer delete(c.typeVisiting, key)
-
-	ta := c.m.Types[a]
-	tb := c.m.Types[b]
-	if ta.SubType != tb.SubType || ta.Final != tb.Final || ta.Kind != tb.Kind || len(ta.SuperTypes) != len(tb.SuperTypes) {
-		c.typeMemo[key] = false
-		return false
-	}
-	for i := range ta.SuperTypes {
-		if !c.typeIndicesEquivalent(ta.SuperTypes[i], tb.SuperTypes[i]) {
-			c.typeMemo[key] = false
-			return false
-		}
-	}
-
-	var eq bool
-	switch ta.Kind {
-	case wasmir.TypeDefKindFunc:
-		eq = len(ta.Params) == len(tb.Params) && len(ta.Results) == len(tb.Results)
-		if eq {
-			for i := range ta.Params {
-				if !c.valueTypesEquivalent(ta.Params[i], tb.Params[i]) {
-					eq = false
-					break
-				}
-			}
-		}
-		if eq {
-			for i := range ta.Results {
-				if !c.valueTypesEquivalent(ta.Results[i], tb.Results[i]) {
-					eq = false
-					break
-				}
-			}
-		}
-	case wasmir.TypeDefKindStruct:
-		eq = len(ta.Fields) == len(tb.Fields)
-		if eq {
-			for i := range ta.Fields {
-				if !c.fieldTypesEquivalent(ta.Fields[i], tb.Fields[i]) {
-					eq = false
-					break
-				}
-			}
-		}
-	case wasmir.TypeDefKindArray:
-		eq = c.fieldTypesEquivalent(ta.ElemField, tb.ElemField)
-	default:
-		eq = false
-	}
-	c.typeMemo[key] = eq
-	return eq
-}
-
-func (c *typeEquivalenceChecker) valueTypesEquivalent(a, b wasmir.ValueType) bool {
-	if a.Kind != b.Kind {
-		return false
-	}
-	if a.Kind != wasmir.ValueKindRef {
-		return a == b
-	}
-	if a.Nullable != b.Nullable {
-		return false
-	}
-	if a.UsesTypeIndex() && b.UsesTypeIndex() {
-		return c.typeIndicesEquivalent(a.HeapType.TypeIndex, b.HeapType.TypeIndex)
-	}
-	return a.HeapType.Kind == b.HeapType.Kind
-}
-
-func (c *typeEquivalenceChecker) fieldTypesEquivalent(a, b wasmir.FieldType) bool {
-	if a.Mutable != b.Mutable || a.Packed != b.Packed {
-		return false
-	}
-	if a.Packed != wasmir.PackedTypeNone {
-		return true
-	}
-	return c.valueTypesEquivalent(a.Type, b.Type)
+	return typeequiv.Types(m, a, m, b)
 }
 
 // isModuleValueSubtype checks value-type subtyping under the module's type
@@ -606,8 +324,7 @@ func isValidDeclaredSubtype(m *wasmir.Module, sub, super wasmir.TypeDef) bool {
 				continue
 			}
 			if sf.Mutable {
-				c := newTypeEquivalenceChecker(m)
-				if !c.fieldTypesEquivalent(sf, gf) {
+				if !typeequiv.FieldTypes(m, sf, m, gf) {
 					return false
 				}
 			} else if !isModuleValueSubtype(m, sf.Type, gf.Type) {
@@ -623,8 +340,7 @@ func isValidDeclaredSubtype(m *wasmir.Module, sub, super wasmir.TypeDef) bool {
 			return true
 		}
 		if sub.ElemField.Mutable {
-			c := newTypeEquivalenceChecker(m)
-			return c.fieldTypesEquivalent(sub.ElemField, super.ElemField)
+			return typeequiv.FieldTypes(m, sub.ElemField, m, super.ElemField)
 		}
 		return isModuleValueSubtype(m, sub.ElemField.Type, super.ElemField.Type)
 	default:
@@ -644,7 +360,7 @@ func typeRefVisibleFromType(m *wasmir.Module, fromIndex, targetIndex uint32) boo
 	if targetIndex < fromIndex {
 		return true
 	}
-	groupStart, groupSize, _ := recGroupInfo(m, fromIndex)
+	groupStart, groupSize, _ := typeequiv.RecGroupInfo(m, fromIndex)
 	return groupSize > 1 && targetIndex >= groupStart && targetIndex < groupStart+groupSize
 }
 

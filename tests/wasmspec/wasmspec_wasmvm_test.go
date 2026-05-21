@@ -84,7 +84,6 @@ var wasmSpecWasmvmDeniedScripts = []string{
 	"scripts/simd/simd_store32_lane.wast",
 	"scripts/simd/simd_store64_lane.wast",
 	"scripts/simd/simd_store8_lane.wast",
-	"scripts/type-equivalence.wast",
 	"scripts/type-rec.wast",
 }
 

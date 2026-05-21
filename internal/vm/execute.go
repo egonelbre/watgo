@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"math"
 	"math/bits"
-	"slices"
 
+	"github.com/eliben/watgo/internal/typeequiv"
 	"github.com/eliben/watgo/wasmir"
 )
 
@@ -1559,11 +1559,11 @@ func (e *executor) checkFunctionReferenceType(ref Reference, callTypeIndex uint3
 	if inst == nil {
 		inst = e.inst
 	}
-	got, err := inst.FuncType(ref.FuncIndex)
+	gotTypeIndex, err := inst.FuncTypeIndex(ref.FuncIndex)
 	if err != nil {
 		return err
 	}
-	if got.Kind != wasmir.TypeDefKindFunc || !slices.Equal(got.Params, want.Params) || !slices.Equal(got.Results, want.Results) {
+	if !typeequiv.FuncTypes(inst.m, gotTypeIndex, e.inst.m, callTypeIndex) {
 		return fmt.Errorf("indirect call type mismatch")
 	}
 	return nil

@@ -720,6 +720,71 @@ func TestIndirectCalls(t *testing.T) {
 	}
 }
 
+// TestIndirectCallTypeEquivalence checks that call_indirect accepts
+// structurally equivalent function types, not only byte-for-byte identical
+// indexed reference types.
+func TestIndirectCallTypeEquivalence(t *testing.T) {
+	rt := wasmvm.NewRuntime()
+	inst, err := rt.Instantiate(parseWAT(t, `
+		(module
+			(type $s0 (func (param i32)))
+			(type $s1 (func (param i32 (ref $s0))))
+			(type $s2 (func (param i32 (ref $s0))))
+			(type $t1 (func (param (ref $s1))))
+			(type $t2 (func (param (ref $s2))))
+			(func $s1 (type $s1))
+			(func $s2 (type $s2))
+			(func $f1 (type $t1))
+			(func $f2 (type $t2))
+			(table funcref (elem $f1 $f2))
+			(elem declare func $s1 $s2)
+			(func (export "run")
+				ref.func $s1
+				i32.const 1
+				call_indirect (type $t1)
+				ref.func $s2
+				i32.const 0
+				call_indirect (type $t2)))
+	`), nil)
+	if err != nil {
+		t.Fatalf("Instantiate failed: %v", err)
+	}
+
+	callExport(t, inst, "run")
+}
+
+// TestFunctionImportTypeEquivalence checks that importing an exported
+// WebAssembly function compares indexed reference types structurally across the
+// exporter and importer modules.
+func TestFunctionImportTypeEquivalence(t *testing.T) {
+	rt := wasmvm.NewRuntime()
+	exporter, err := rt.Instantiate(parseWAT(t, `
+		(module
+			(type $s0 (func (param i32) (result f32)))
+			(type $s1 (func (param i32 (ref $s0)) (result (ref $s0))))
+			(type $t1 (func (param (ref $s1))))
+			(func (export "f") (param (ref $t1))))
+	`), nil)
+	if err != nil {
+		t.Fatalf("Instantiate exporter failed: %v", err)
+	}
+	f, ok := exporter.ExportedFunc("f")
+	if !ok {
+		t.Fatal("missing f export")
+	}
+
+	_, err = rt.Instantiate(parseWAT(t, `
+		(module
+			(type $s0 (func (param i32) (result f32)))
+			(type $s2 (func (param i32 (ref $s0)) (result (ref $s0))))
+			(type $t2 (func (param (ref $s2))))
+			(func (import "M" "f") (param (ref $t2))))
+	`), wasmvm.Imports{"M": {"f": f}})
+	if err != nil {
+		t.Fatalf("Instantiate importer failed: %v", err)
+	}
+}
+
 // TestIndirectCallTraps checks the runtime traps specific to indirect calls:
 // null table elements and function references whose type does not match the
 // call_indirect type immediate.
