@@ -2910,6 +2910,55 @@ func TestMemory64SizeAndGrow(t *testing.T) {
 	}
 }
 
+// TestMemory64BulkOps checks that memory64 bulk-memory instructions consume
+// i64 destination and length operands where required.
+func TestMemory64BulkOps(t *testing.T) {
+	rt := wasmvm.NewRuntime()
+	inst, err := rt.Instantiate(parseWAT(t, `
+		(module
+			(memory i64 1)
+			(data (i64.const 0) "abcdef")
+			(data "wxyz")
+			(func (export "fill") (result i32)
+				i64.const 16
+				i32.const 127
+				i64.const 4
+				memory.fill
+				i64.const 16
+				i32.load)
+			(func (export "copy") (result i32)
+				i64.const 32
+				i64.const 0
+				i64.const 4
+				memory.copy
+				i64.const 32
+				i32.load)
+			(func (export "init") (result i32)
+				i64.const 48
+				i32.const 1
+				i32.const 3
+				memory.init 1
+				i64.const 48
+				i32.load))
+	`), nil)
+	if err != nil {
+		t.Fatalf("Instantiate failed: %v", err)
+	}
+
+	results := callExport(t, inst, "fill")
+	if len(results) != 1 || results[0] != wasmvm.I32(0x7f7f7f7f) {
+		t.Fatalf("fill got results %#v, want i32 0x7f7f7f7f", results)
+	}
+	results = callExport(t, inst, "copy")
+	if len(results) != 1 || results[0] != wasmvm.I32(0x64636261) {
+		t.Fatalf("copy got results %#v, want i32 0x64636261", results)
+	}
+	results = callExport(t, inst, "init")
+	if len(results) != 1 || results[0] != wasmvm.I32(0x007a7978) {
+		t.Fatalf("init got results %#v, want i32 0x007a7978", results)
+	}
+}
+
 func TestI64NarrowMemoryOps(t *testing.T) {
 	// Narrow i64 loads extend to i64, and narrow i64 stores truncate the
 	// low-order bytes of the stored value.

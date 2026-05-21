@@ -49,12 +49,8 @@ var wasmSpecWasmvmDeniedScripts = []string{
 
 	"scripts/memory64/align64.wast",
 	"scripts/memory64/binary_leb128_64.wast",
-	"scripts/memory64/bulk64.wast",
 	"scripts/memory64/call_indirect64.wast",
 	"scripts/memory64/memory64-imports.wast",
-	"scripts/memory64/memory_copy64.wast",
-	"scripts/memory64/memory_fill64.wast",
-	"scripts/memory64/memory_init64.wast",
 	"scripts/memory64/table64.wast",
 	"scripts/memory64/table_copy64.wast",
 	"scripts/memory64/table_copy_mixed.wast",

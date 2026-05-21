@@ -590,26 +590,26 @@ func (e *executor) run() ([]Value, error) {
 			if e.inst == nil {
 				return nil, e.instructionError(fmt.Errorf("instance is nil"))
 			}
-			size, err := e.popI32()
+			size, err := e.popMemoryIndexOperand(ins.index)
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
-			src, err := e.popI32()
+			src, err := e.popMemoryIndexOperand(uint32(ins.bits))
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
-			dst, err := e.popI32()
+			dst, err := e.popMemoryIndexOperand(ins.index)
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
-			if err := e.inst.memoryCopy(ins.index, uint64(uint32(dst)), uint32(ins.bits), uint64(uint32(src)), uint64(uint32(size))); err != nil {
+			if err := e.inst.memoryCopy(ins.index, dst, uint32(ins.bits), src, size); err != nil {
 				return nil, e.instructionError(err)
 			}
 		case wasmir.InstrMemoryFill:
 			if e.inst == nil {
 				return nil, e.instructionError(fmt.Errorf("instance is nil"))
 			}
-			size, err := e.popI32()
+			size, err := e.popMemoryIndexOperand(ins.index)
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
@@ -617,11 +617,11 @@ func (e *executor) run() ([]Value, error) {
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
-			dst, err := e.popI32()
+			dst, err := e.popMemoryIndexOperand(ins.index)
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
-			if err := e.inst.memoryFill(ins.index, uint64(uint32(dst)), uint64(uint32(size)), byte(value)); err != nil {
+			if err := e.inst.memoryFill(ins.index, dst, size, byte(value)); err != nil {
 				return nil, e.instructionError(err)
 			}
 		case wasmir.InstrMemoryInit:
@@ -636,11 +636,11 @@ func (e *executor) run() ([]Value, error) {
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
-			dst, err := e.popI32()
+			dst, err := e.popMemoryIndexOperand(ins.index)
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
-			if err := e.inst.memoryInit(ins.index, uint32(ins.bits), uint64(uint32(dst)), uint64(uint32(src)), uint64(uint32(size))); err != nil {
+			if err := e.inst.memoryInit(ins.index, uint32(ins.bits), dst, uint64(uint32(src)), uint64(uint32(size))); err != nil {
 				return nil, e.instructionError(err)
 			}
 		case wasmir.InstrDataDrop:
