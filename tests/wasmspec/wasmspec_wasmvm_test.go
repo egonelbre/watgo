@@ -51,10 +51,6 @@ var wasmSpecWasmvmDeniedScripts = []string{
 
 	"scripts/bulk-memory/table_init.wast", // gc-related
 	"scripts/simd/simd_conversions.wast",
-	"scripts/simd/simd_f32x4_pmin_pmax.wast",
-	"scripts/simd/simd_f32x4_rounding.wast",
-	"scripts/simd/simd_f64x2_pmin_pmax.wast",
-	"scripts/simd/simd_f64x2_rounding.wast",
 	"scripts/simd/simd_i16x8_arith2.wast",
 	"scripts/simd/simd_i16x8_extadd_pairwise_i8x16.wast",
 	"scripts/simd/simd_i16x8_extmul_i8x16.wast",

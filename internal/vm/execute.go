@@ -972,7 +972,9 @@ func (e *executor) run() ([]Value, error) {
 		case wasmir.InstrV128Not,
 			wasmir.InstrI8x16Neg, wasmir.InstrI16x8Neg, wasmir.InstrI32x4Neg, wasmir.InstrI64x2Neg,
 			wasmir.InstrF32x4Abs, wasmir.InstrF32x4Neg, wasmir.InstrF32x4Sqrt,
+			wasmir.InstrF32x4Ceil, wasmir.InstrF32x4Floor, wasmir.InstrF32x4Trunc, wasmir.InstrF32x4Nearest,
 			wasmir.InstrF64x2Abs, wasmir.InstrF64x2Neg, wasmir.InstrF64x2Sqrt,
+			wasmir.InstrF64x2Ceil, wasmir.InstrF64x2Floor, wasmir.InstrF64x2Trunc, wasmir.InstrF64x2Nearest,
 			wasmir.InstrF32x4ConvertI32x4S, wasmir.InstrF32x4ConvertI32x4U,
 			wasmir.InstrI32x4TruncSatF32x4S, wasmir.InstrI32x4TruncSatF32x4U:
 			value, err := e.evalV128Unary(ins.kind)
@@ -988,9 +990,9 @@ func (e *executor) run() ([]Value, error) {
 			wasmir.InstrI16x8Sub, wasmir.InstrI16x8SubSatS, wasmir.InstrI16x8SubSatU, wasmir.InstrI16x8Mul,
 			wasmir.InstrI32x4Add, wasmir.InstrI32x4Sub, wasmir.InstrI32x4Mul,
 			wasmir.InstrI64x2Add, wasmir.InstrI64x2Sub, wasmir.InstrI64x2Mul,
-			wasmir.InstrF32x4Min, wasmir.InstrF32x4Max,
+			wasmir.InstrF32x4Min, wasmir.InstrF32x4Max, wasmir.InstrF32x4Pmin, wasmir.InstrF32x4Pmax,
 			wasmir.InstrF32x4Add, wasmir.InstrF32x4Sub, wasmir.InstrF32x4Div, wasmir.InstrF32x4Mul,
-			wasmir.InstrF64x2Min, wasmir.InstrF64x2Max,
+			wasmir.InstrF64x2Min, wasmir.InstrF64x2Max, wasmir.InstrF64x2Pmin, wasmir.InstrF64x2Pmax,
 			wasmir.InstrF64x2Add, wasmir.InstrF64x2Sub, wasmir.InstrF64x2Div, wasmir.InstrF64x2Mul:
 			value, err := e.evalV128Binary(ins.kind)
 			if err != nil {
@@ -2794,9 +2796,11 @@ func (e *executor) evalV128Unary(kind wasmir.InstrKind) ([16]byte, error) {
 		return negI32x4(vec), nil
 	case wasmir.InstrI64x2Neg:
 		return negI64x2(vec), nil
-	case wasmir.InstrF32x4Abs, wasmir.InstrF32x4Neg, wasmir.InstrF32x4Sqrt:
+	case wasmir.InstrF32x4Abs, wasmir.InstrF32x4Neg, wasmir.InstrF32x4Sqrt,
+		wasmir.InstrF32x4Ceil, wasmir.InstrF32x4Floor, wasmir.InstrF32x4Trunc, wasmir.InstrF32x4Nearest:
 		return unaryF32x4(kind, vec), nil
-	case wasmir.InstrF64x2Abs, wasmir.InstrF64x2Neg, wasmir.InstrF64x2Sqrt:
+	case wasmir.InstrF64x2Abs, wasmir.InstrF64x2Neg, wasmir.InstrF64x2Sqrt,
+		wasmir.InstrF64x2Ceil, wasmir.InstrF64x2Floor, wasmir.InstrF64x2Trunc, wasmir.InstrF64x2Nearest:
 		return unaryF64x2(kind, vec), nil
 	case wasmir.InstrF32x4ConvertI32x4S, wasmir.InstrF32x4ConvertI32x4U:
 		return convertI32x4ToF32x4(kind, vec), nil
@@ -2834,10 +2838,10 @@ func (e *executor) evalV128Binary(kind wasmir.InstrKind) ([16]byte, error) {
 		return binaryI32x4(kind, lhs, rhs), nil
 	case wasmir.InstrI64x2Add, wasmir.InstrI64x2Sub, wasmir.InstrI64x2Mul:
 		return binaryI64x2(kind, lhs, rhs), nil
-	case wasmir.InstrF32x4Min, wasmir.InstrF32x4Max,
+	case wasmir.InstrF32x4Min, wasmir.InstrF32x4Max, wasmir.InstrF32x4Pmin, wasmir.InstrF32x4Pmax,
 		wasmir.InstrF32x4Add, wasmir.InstrF32x4Sub, wasmir.InstrF32x4Div, wasmir.InstrF32x4Mul:
 		return binaryF32x4(kind, lhs, rhs), nil
-	case wasmir.InstrF64x2Min, wasmir.InstrF64x2Max,
+	case wasmir.InstrF64x2Min, wasmir.InstrF64x2Max, wasmir.InstrF64x2Pmin, wasmir.InstrF64x2Pmax,
 		wasmir.InstrF64x2Add, wasmir.InstrF64x2Sub, wasmir.InstrF64x2Div, wasmir.InstrF64x2Mul:
 		return binaryF64x2(kind, lhs, rhs), nil
 	default:
@@ -3073,6 +3077,14 @@ func unaryF32x4(kind wasmir.InstrKind, vec [16]byte) [16]byte {
 			} else {
 				result = math.Float32bits(float32(math.Sqrt(float64(v))))
 			}
+		case wasmir.InstrF32x4Ceil:
+			result = math.Float32bits(float32(math.Ceil(float64(math.Float32frombits(raw)))))
+		case wasmir.InstrF32x4Floor:
+			result = math.Float32bits(float32(math.Floor(float64(math.Float32frombits(raw)))))
+		case wasmir.InstrF32x4Trunc:
+			result = math.Float32bits(float32(math.Trunc(float64(math.Float32frombits(raw)))))
+		case wasmir.InstrF32x4Nearest:
+			result = math.Float32bits(float32(math.RoundToEven(float64(math.Float32frombits(raw)))))
 		}
 		binary.LittleEndian.PutUint32(out[i:i+4], result)
 	}
@@ -3097,6 +3109,14 @@ func unaryF64x2(kind wasmir.InstrKind, vec [16]byte) [16]byte {
 			} else {
 				result = math.Float64bits(math.Sqrt(v))
 			}
+		case wasmir.InstrF64x2Ceil:
+			result = math.Float64bits(math.Ceil(math.Float64frombits(raw)))
+		case wasmir.InstrF64x2Floor:
+			result = math.Float64bits(math.Floor(math.Float64frombits(raw)))
+		case wasmir.InstrF64x2Trunc:
+			result = math.Float64bits(math.Trunc(math.Float64frombits(raw)))
+		case wasmir.InstrF64x2Nearest:
+			result = math.Float64bits(math.RoundToEven(math.Float64frombits(raw)))
 		}
 		binary.LittleEndian.PutUint64(out[i:i+8], result)
 	}
@@ -3284,6 +3304,19 @@ func binaryF64x2(kind wasmir.InstrKind, lhs [16]byte, rhs [16]byte) [16]byte {
 
 // binaryF32 applies one scalar f32 operation and returns the result bits.
 func binaryF32(kind wasmir.InstrKind, a float32, b float32) uint32 {
+	switch kind {
+	case wasmir.InstrF32x4Pmin:
+		if b < a {
+			return math.Float32bits(b)
+		}
+		return math.Float32bits(a)
+	case wasmir.InstrF32x4Pmax:
+		if a < b {
+			return math.Float32bits(b)
+		}
+		return math.Float32bits(a)
+	}
+
 	if math.IsNaN(float64(a)) || math.IsNaN(float64(b)) {
 		return canonicalF32NaNBits
 	}
@@ -3325,6 +3358,19 @@ func binaryF32(kind wasmir.InstrKind, a float32, b float32) uint32 {
 
 // binaryF64 applies one scalar f64 operation and returns the result bits.
 func binaryF64(kind wasmir.InstrKind, a float64, b float64) uint64 {
+	switch kind {
+	case wasmir.InstrF64x2Pmin:
+		if b < a {
+			return math.Float64bits(b)
+		}
+		return math.Float64bits(a)
+	case wasmir.InstrF64x2Pmax:
+		if a < b {
+			return math.Float64bits(b)
+		}
+		return math.Float64bits(a)
+	}
+
 	if math.IsNaN(a) || math.IsNaN(b) {
 		return canonicalF64NaNBits
 	}
