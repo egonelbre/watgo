@@ -709,6 +709,8 @@ func (inst *Instance) evalConstExpr(init []wasmir.Instruction, constExpr bool) (
 			stack = append(stack, Value{Type: wasmir.ValueTypeF32, F32: math.Float32frombits(ins.F32Const)})
 		case wasmir.InstrF64Const:
 			stack = append(stack, Value{Type: wasmir.ValueTypeF64, F64: math.Float64frombits(ins.F64Const)})
+		case wasmir.InstrV128Const:
+			stack = append(stack, Value{Type: wasmir.ValueTypeV128, V128: ins.V128Const})
 		case wasmir.InstrRefNull:
 			stack = append(stack, Value{Type: ins.RefType, Ref: Reference{Kind: RefKindNull}})
 		case wasmir.InstrRefFunc:

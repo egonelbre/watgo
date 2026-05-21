@@ -32,6 +32,28 @@ func TestV128Const(t *testing.T) {
 	}
 }
 
+// TestV128GlobalConst checks that v128.const can initialize a global and that
+// global.get/set preserve v128 values.
+func TestV128GlobalConst(t *testing.T) {
+	rt := wasmvm.NewRuntime()
+	inst, err := rt.Instantiate(parseWAT(t, `
+		(module
+			(global $g (mut v128) (v128.const i32x4 0 1 2 3))
+			(func (export "get") (result v128)
+				global.get $g)
+			(func (export "set") (param v128)
+				local.get 0
+				global.set $g))
+	`), nil)
+	if err != nil {
+		t.Fatalf("Instantiate failed: %v", err)
+	}
+
+	checkV128Export(t, inst, "get", v128I32x4(0, 1, 2, 3))
+	callExport(t, inst, "set", wasmvm.Value{Type: wasmir.ValueTypeV128, V128: v128I32x4(4, 5, 6, 7)})
+	checkV128Export(t, inst, "get", v128I32x4(4, 5, 6, 7))
+}
+
 // TestV128Splat checks scalar-to-vector SIMD splat instructions.
 func TestV128Splat(t *testing.T) {
 	rt := wasmvm.NewRuntime()
