@@ -146,8 +146,7 @@ func (mem *Memory) Size() uint64 {
 
 // Table is one instantiated table in the module's table index space.
 type Table struct {
-	// addressType is the validated index type for this table. The VM currently
-	// supports only i32-indexed tables.
+	// addressType is the validated index type for this table.
 	addressType wasmir.ValueType
 
 	// refType is the reference type accepted by this table's elements.
@@ -162,7 +161,7 @@ type Table struct {
 
 // NewTable creates a VM table instance for the validated table definition t.
 func NewTable(t wasmir.Table) (*Table, error) {
-	if t.AddressType != wasmir.ValueTypeI32 {
+	if t.AddressType != wasmir.ValueTypeI32 && t.AddressType != wasmir.ValueTypeI64 {
 		return nil, fmt.Errorf("unsupported table address type %s", t.AddressType)
 	}
 	if t.Min > uint64(int(^uint(0)>>1)) {
@@ -629,21 +628,31 @@ func (inst *Instance) applyElementSegments() error {
 	return nil
 }
 
-// elementSegmentOffset evaluates the active element segment offset as an i32
-// table index.
+// elementSegmentOffset evaluates the active element segment offset using its
+// target table's address type.
 func (inst *Instance) elementSegmentOffset(seg wasmir.ElementSegment) (uint64, error) {
+	table, err := inst.tableInst(seg.TableIndex)
+	if err != nil {
+		return 0, err
+	}
 	if len(seg.OffsetExpr) > 0 {
 		v, err := inst.evalConstExpr(seg.OffsetExpr, true)
 		if err != nil {
 			return 0, err
 		}
-		if v.Type != wasmir.ValueTypeI32 {
-			return 0, fmt.Errorf("offset expression has type %s, want i32", v.Type)
+		if v.Type != table.addressType {
+			return 0, fmt.Errorf("offset expression has type %s, want %s", v.Type, table.addressType)
+		}
+		if v.Type == wasmir.ValueTypeI64 {
+			return uint64(v.I64), nil
 		}
 		return uint64(uint32(v.I32)), nil
 	}
-	if seg.OffsetType != wasmir.ValueTypeI32 {
-		return 0, fmt.Errorf("offset has type %s, want i32", seg.OffsetType)
+	if seg.OffsetType != table.addressType {
+		return 0, fmt.Errorf("offset has type %s, want %s", seg.OffsetType, table.addressType)
+	}
+	if seg.OffsetType == wasmir.ValueTypeI64 {
+		return uint64(seg.OffsetI64), nil
 	}
 	return uint64(uint32(int32(seg.OffsetI64))), nil
 }
@@ -923,7 +932,7 @@ func zeroTableValue(refType wasmir.ValueType) (Value, error) {
 // newTable creates an initialized table instance after the initial value is
 // known.
 func newTable(t wasmir.Table, init Value) (*Table, error) {
-	if t.AddressType != wasmir.ValueTypeI32 {
+	if t.AddressType != wasmir.ValueTypeI32 && t.AddressType != wasmir.ValueTypeI64 {
 		return nil, fmt.Errorf("unsupported table address type %s", t.AddressType)
 	}
 	if t.Min > uint64(int(^uint(0)>>1)) {
@@ -1190,6 +1199,15 @@ func (inst *Instance) memoryAddressType(index uint32) (wasmir.ValueType, error) 
 // tableInst resolves a table index to the mutable instantiated table state.
 func (inst *Instance) tableInst(index uint32) (*Table, error) {
 	return inst.Table(index)
+}
+
+// tableAddressType returns the address operand type of the indexed table.
+func (inst *Instance) tableAddressType(index uint32) (wasmir.ValueType, error) {
+	table, err := inst.tableInst(index)
+	if err != nil {
+		return wasmir.ValueType{}, err
+	}
+	return table.addressType, nil
 }
 
 // table returns the in-bounds element window addressed by a VM table operation.

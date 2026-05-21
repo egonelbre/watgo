@@ -47,20 +47,6 @@ var wasmSpecWasmvmDeniedScripts = []string{
 	"scripts/gc/struct.wast",
 	"scripts/gc/type-subtyping.wast",
 
-	"scripts/memory64/align64.wast",
-	"scripts/memory64/binary_leb128_64.wast",
-	"scripts/memory64/call_indirect64.wast",
-	"scripts/memory64/memory64-imports.wast",
-	"scripts/memory64/table64.wast",
-	"scripts/memory64/table_copy64.wast",
-	"scripts/memory64/table_copy_mixed.wast",
-	"scripts/memory64/table_fill64.wast",
-	"scripts/memory64/table_get64.wast",
-	"scripts/memory64/table_grow64.wast",
-	"scripts/memory64/table_init64.wast",
-	"scripts/memory64/table_set64.wast",
-	"scripts/memory64/table_size64.wast",
-
 	"scripts/relaxed-simd/",
 
 	"scripts/bulk-memory/table_init.wast", // gc-related
@@ -201,8 +187,8 @@ func newWasmSpecWasmvmRunner() *wasmSpecWasmvmRunner {
 	}
 }
 
-// wasmSpecWasmvmSpectestImports returns the function imports exposed by the
-// spec harness's synthetic "spectest" module.
+// wasmSpecWasmvmSpectestImports returns the extern imports exposed by the spec
+// harness's synthetic "spectest" module.
 func wasmSpecWasmvmSpectestImports() wasmvm.Imports {
 	return wasmvm.Imports{
 		"spectest": map[string]wasmvm.Extern{
@@ -214,6 +200,7 @@ func wasmSpecWasmvmSpectestImports() wasmvm.Imports {
 			"print_i32_f32": wasmSpecWasmvmHostFunc([]wasmir.ValueType{wasmir.ValueTypeI32, wasmir.ValueTypeF32}),
 			"print_f64_f64": wasmSpecWasmvmHostFunc([]wasmir.ValueType{wasmir.ValueTypeF64, wasmir.ValueTypeF64}),
 			"table":         wasmSpecWasmvmTable(wasmir.ValueTypeI32, 10, wasmSpecUint64Ptr(20)),
+			"table64":       wasmSpecWasmvmTable(wasmir.ValueTypeI64, 0, nil),
 			"memory":        wasmSpecWasmvmMemory(wasmir.ValueTypeI32, 1, wasmSpecUint64Ptr(2)),
 			"global_i32":    wasmSpecWasmvmGlobal(wasmvm.I32(666)),
 			"global_i64":    wasmSpecWasmvmGlobal(wasmvm.I64(666)),

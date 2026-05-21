@@ -514,6 +514,87 @@ func TestTableGrowFillCopy(t *testing.T) {
 	}
 }
 
+// TestTable64Ops checks that i64-indexed tables use i64 operands and results
+// for indirect calls and table instructions.
+func TestTable64Ops(t *testing.T) {
+	rt := wasmvm.NewRuntime()
+	inst, err := rt.Instantiate(parseWAT(t, `
+		(module
+			(type $out-i32 (func (result i32)))
+			(table $t i64 3 6 funcref)
+			(func $a (type $out-i32)
+				i32.const 42)
+			(func $b (type $out-i32)
+				i32.const 7)
+			(elem (i64.const 0) func $a)
+			(elem $e funcref (ref.func $b))
+			(func (export "size") (result i64)
+				table.size $t)
+			(func (export "call") (param i64) (result i32)
+				local.get 0
+				call_indirect $t (type $out-i32))
+			(func (export "set_b") (param i64)
+				local.get 0
+				ref.func $b
+				table.set $t)
+			(func (export "grow") (result i64)
+				ref.null func
+				i64.const 3
+				table.grow $t)
+			(func (export "fill_b") (param i64 i64)
+				local.get 0
+				ref.func $b
+				local.get 1
+				table.fill $t)
+			(func (export "init_b") (param i64)
+				local.get 0
+				i32.const 0
+				i32.const 1
+				table.init $t $e)
+			(func (export "copy") (param i64 i64 i64)
+				local.get 0
+				local.get 1
+				local.get 2
+				table.copy $t $t))
+	`), nil)
+	if err != nil {
+		t.Fatalf("Instantiate failed: %v", err)
+	}
+
+	results := callExport(t, inst, "size")
+	if len(results) != 1 || results[0] != wasmvm.I64(3) {
+		t.Fatalf("size got results %#v, want i64 3", results)
+	}
+	results = callExport(t, inst, "call", wasmvm.I64(0))
+	if len(results) != 1 || results[0] != wasmvm.I32(42) {
+		t.Fatalf("call(0) got results %#v, want i32 42", results)
+	}
+	callExport(t, inst, "set_b", wasmvm.I64(1))
+	results = callExport(t, inst, "call", wasmvm.I64(1))
+	if len(results) != 1 || results[0] != wasmvm.I32(7) {
+		t.Fatalf("call(1) after set_b got results %#v, want i32 7", results)
+	}
+	results = callExport(t, inst, "grow")
+	if len(results) != 1 || results[0] != wasmvm.I64(3) {
+		t.Fatalf("grow got results %#v, want old size i64 3", results)
+	}
+	callExport(t, inst, "fill_b", wasmvm.I64(2), wasmvm.I64(2))
+	results = callExport(t, inst, "call", wasmvm.I64(3))
+	if len(results) != 1 || results[0] != wasmvm.I32(7) {
+		t.Fatalf("call(3) after fill_b got results %#v, want i32 7", results)
+	}
+	callExport(t, inst, "init_b", wasmvm.I64(4))
+	results = callExport(t, inst, "call", wasmvm.I64(4))
+	if len(results) != 1 || results[0] != wasmvm.I32(7) {
+		t.Fatalf("call(4) after init_b got results %#v, want i32 7", results)
+	}
+	callExport(t, inst, "copy", wasmvm.I64(5), wasmvm.I64(0), wasmvm.I64(1))
+	results = callExport(t, inst, "call", wasmvm.I64(5))
+	if len(results) != 1 || results[0] != wasmvm.I32(42) {
+		t.Fatalf("call(5) after copy got results %#v, want i32 42", results)
+	}
+}
+
 // TestTableGrowPastI32AddressSpaceFails checks that a grow which would make an
 // i32-indexed table larger than the WebAssembly i32 address space fails without
 // allocating the requested elements.

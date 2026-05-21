@@ -658,16 +658,18 @@ func (e *executor) run() ([]Value, error) {
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
-			e.push(Value{Type: wasmir.ValueTypeI32, I32: int32(uint32(size))})
+			if err := e.pushTableIndexResult(ins.index, size); err != nil {
+				return nil, e.instructionError(err)
+			}
 		case wasmir.InstrTableGet:
 			if e.inst == nil {
 				return nil, e.instructionError(fmt.Errorf("instance is nil"))
 			}
-			elemIndex, err := e.popI32()
+			elemIndex, err := e.popTableIndexOperand(ins.index)
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
-			v, err := e.inst.tableGet(ins.index, uint64(uint32(elemIndex)))
+			v, err := e.inst.tableGet(ins.index, elemIndex)
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
@@ -680,18 +682,18 @@ func (e *executor) run() ([]Value, error) {
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
-			elemIndex, err := e.popI32()
+			elemIndex, err := e.popTableIndexOperand(ins.index)
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
-			if err := e.inst.tableSet(ins.index, uint64(uint32(elemIndex)), v); err != nil {
+			if err := e.inst.tableSet(ins.index, elemIndex, v); err != nil {
 				return nil, e.instructionError(err)
 			}
 		case wasmir.InstrTableGrow:
 			if e.inst == nil {
 				return nil, e.instructionError(fmt.Errorf("instance is nil"))
 			}
-			delta, err := e.popI32()
+			delta, err := e.popTableIndexOperand(ins.index)
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
@@ -699,20 +701,24 @@ func (e *executor) run() ([]Value, error) {
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
-			oldSize, ok, err := e.inst.tableGrow(ins.index, init, uint64(uint32(delta)))
+			oldSize, ok, err := e.inst.tableGrow(ins.index, init, delta)
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
 			if !ok {
-				e.push(Value{Type: wasmir.ValueTypeI32, I32: -1})
+				if err := e.pushTableIndexResult(ins.index, ^uint64(0)); err != nil {
+					return nil, e.instructionError(err)
+				}
 				continue
 			}
-			e.push(Value{Type: wasmir.ValueTypeI32, I32: int32(uint32(oldSize))})
+			if err := e.pushTableIndexResult(ins.index, oldSize); err != nil {
+				return nil, e.instructionError(err)
+			}
 		case wasmir.InstrTableFill:
 			if e.inst == nil {
 				return nil, e.instructionError(fmt.Errorf("instance is nil"))
 			}
-			size, err := e.popI32()
+			size, err := e.popTableIndexOperand(ins.index)
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
@@ -720,30 +726,31 @@ func (e *executor) run() ([]Value, error) {
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
-			dst, err := e.popI32()
+			dst, err := e.popTableIndexOperand(ins.index)
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
-			if err := e.inst.tableFill(ins.index, uint64(uint32(dst)), uint64(uint32(size)), value); err != nil {
+			if err := e.inst.tableFill(ins.index, dst, size, value); err != nil {
 				return nil, e.instructionError(err)
 			}
 		case wasmir.InstrTableCopy:
 			if e.inst == nil {
 				return nil, e.instructionError(fmt.Errorf("instance is nil"))
 			}
-			size, err := e.popI32()
+			srcTableIndex := uint32(ins.bits)
+			size, err := e.popTableCopySizeOperand(ins.index, srcTableIndex)
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
-			src, err := e.popI32()
+			src, err := e.popTableIndexOperand(srcTableIndex)
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
-			dst, err := e.popI32()
+			dst, err := e.popTableIndexOperand(ins.index)
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
-			if err := e.inst.tableCopy(ins.index, uint64(uint32(dst)), uint32(ins.bits), uint64(uint32(src)), uint64(uint32(size))); err != nil {
+			if err := e.inst.tableCopy(ins.index, dst, srcTableIndex, src, size); err != nil {
 				return nil, e.instructionError(err)
 			}
 		case wasmir.InstrTableInit:
@@ -758,11 +765,11 @@ func (e *executor) run() ([]Value, error) {
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
-			dst, err := e.popI32()
+			dst, err := e.popTableIndexOperand(ins.index)
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
-			if err := e.inst.tableInit(ins.index, uint32(ins.bits), uint64(uint32(dst)), uint64(uint32(src)), uint64(uint32(size))); err != nil {
+			if err := e.inst.tableInit(ins.index, uint32(ins.bits), dst, uint64(uint32(src)), uint64(uint32(size))); err != nil {
 				return nil, e.instructionError(err)
 			}
 		case wasmir.InstrElemDrop:
@@ -1436,11 +1443,11 @@ func (e *executor) callIndirectFunction(tableIndex uint32, callTypeIndex uint32)
 	if e.inst == nil {
 		return nil, fmt.Errorf("instance is nil")
 	}
-	elemIndex, err := e.popI32()
+	elemIndex, err := e.popTableIndexOperand(tableIndex)
 	if err != nil {
 		return nil, err
 	}
-	ref, err := e.inst.tableGet(tableIndex, uint64(uint32(elemIndex)))
+	ref, err := e.inst.tableGet(tableIndex, elemIndex)
 	if err != nil {
 		return nil, err
 	}
@@ -1465,11 +1472,11 @@ func (e *executor) tailCallIndirectFunction(tableIndex uint32, callTypeIndex uin
 	if e.inst == nil {
 		return false, nil, fmt.Errorf("instance is nil")
 	}
-	elemIndex, err := e.popI32()
+	elemIndex, err := e.popTableIndexOperand(tableIndex)
 	if err != nil {
 		return false, nil, err
 	}
-	ref, err := e.inst.tableGet(tableIndex, uint64(uint32(elemIndex)))
+	ref, err := e.inst.tableGet(tableIndex, elemIndex)
 	if err != nil {
 		return false, nil, err
 	}
@@ -3519,6 +3526,76 @@ func (e *executor) pushMemoryIndexResult(memoryIndex uint32, value uint64) error
 		return nil
 	default:
 		return fmt.Errorf("memory %d has unsupported address type %s", memoryIndex, addressType)
+	}
+}
+
+// popTableIndexOperand pops an operand whose type follows the indexed table's
+// address type.
+func (e *executor) popTableIndexOperand(tableIndex uint32) (uint64, error) {
+	addressType, err := e.inst.tableAddressType(tableIndex)
+	if err != nil {
+		return 0, err
+	}
+	switch addressType {
+	case wasmir.ValueTypeI32:
+		index, err := e.popI32()
+		if err != nil {
+			return 0, err
+		}
+		return uint64(uint32(index)), nil
+	case wasmir.ValueTypeI64:
+		index, err := e.popI64()
+		if err != nil {
+			return 0, err
+		}
+		return uint64(index), nil
+	default:
+		return 0, fmt.Errorf("table %d has unsupported address type %s", tableIndex, addressType)
+	}
+}
+
+// popTableCopySizeOperand pops the table.copy length operand. Mixed i32/i64
+// table copies use an i32 length; only copies between two i64-indexed tables
+// use an i64 length.
+func (e *executor) popTableCopySizeOperand(dstTableIndex uint32, srcTableIndex uint32) (uint64, error) {
+	dstAddressType, err := e.inst.tableAddressType(dstTableIndex)
+	if err != nil {
+		return 0, err
+	}
+	srcAddressType, err := e.inst.tableAddressType(srcTableIndex)
+	if err != nil {
+		return 0, err
+	}
+	if dstAddressType == wasmir.ValueTypeI64 && srcAddressType == wasmir.ValueTypeI64 {
+		size, err := e.popI64()
+		if err != nil {
+			return 0, err
+		}
+		return uint64(size), nil
+	}
+	size, err := e.popI32()
+	if err != nil {
+		return 0, err
+	}
+	return uint64(uint32(size)), nil
+}
+
+// pushTableIndexResult pushes a table.size or table.grow result in the indexed
+// table's address type.
+func (e *executor) pushTableIndexResult(tableIndex uint32, value uint64) error {
+	addressType, err := e.inst.tableAddressType(tableIndex)
+	if err != nil {
+		return err
+	}
+	switch addressType {
+	case wasmir.ValueTypeI32:
+		e.push(Value{Type: wasmir.ValueTypeI32, I32: int32(uint32(value))})
+		return nil
+	case wasmir.ValueTypeI64:
+		e.push(Value{Type: wasmir.ValueTypeI64, I64: int64(value)})
+		return nil
+	default:
+		return fmt.Errorf("table %d has unsupported address type %s", tableIndex, addressType)
 	}
 }
 
