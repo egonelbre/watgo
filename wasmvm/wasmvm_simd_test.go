@@ -134,6 +134,24 @@ func TestV128MemoryOps(t *testing.T) {
 			(func (export "load64_splat") (result v128)
 				i32.const 0
 				v128.load64_splat)
+			(func (export "load8x8_s") (result v128)
+				i32.const 0
+				v128.load8x8_s)
+			(func (export "load8x8_u") (result v128)
+				i32.const 2
+				v128.load8x8_u)
+			(func (export "load16x4_s") (result v128)
+				i32.const 4
+				v128.load16x4_s)
+			(func (export "load32x2_s") (result v128)
+				i32.const 12
+				v128.load32x2_s)
+			(func (export "load32_zero") (result v128)
+				i32.const 4
+				v128.load32_zero)
+			(func (export "load64_zero") (result v128)
+				i32.const 8
+				v128.load64_zero)
 			(func (export "store") (result v128)
 				i32.const 4
 				v128.const i32x4 0x11223344 0x55667788 0x99aabbcc 0xddeeff00
@@ -179,6 +197,12 @@ func TestV128MemoryOps(t *testing.T) {
 		0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0xce, 0x41,
 		0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0xce, 0x41,
 	})
+	checkV128Export(t, inst, "load8x8_s", v128I32x4(0xffffffff, 0xffffffff, 0x00000000, 0x0041ffce))
+	checkV128Export(t, inst, "load8x8_u", v128I32x4(0x00ff00ff, 0x00000000, 0x004100ce, 0x00000000))
+	checkV128Export(t, inst, "load16x4_s", v128I32x4(0x00000000, 0x000041ce, 0x00000000, 0x00000000))
+	checkV128Export(t, inst, "load32x2_s", v128I32x4(0x408fff00, 0x00000000, 0xffffffff, 0xffffffff))
+	checkV128Export(t, inst, "load32_zero", v128I32x4(0x41ce0000, 0, 0, 0))
+	checkV128Export(t, inst, "load64_zero", v128I32x4(0x00000000, 0x408fff00, 0, 0))
 	checkV128Export(t, inst, "load8_lane", v128I32x4(0x11223344, 0x55667788, 0x99cebbcc, 0xddeeff00))
 	checkV128Export(t, inst, "load32_lane", v128I32x4(0x11223344, 0x55667788, 0x41ce0000, 0xddeeff00))
 	checkV128Export(t, inst, "store", [16]byte{

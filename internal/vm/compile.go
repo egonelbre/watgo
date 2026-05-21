@@ -217,8 +217,12 @@ func compileFunction(m *wasmir.Module, fn *wasmir.Function) (*function, error) {
 			wasmir.InstrF32Load, wasmir.InstrF32Store,
 			wasmir.InstrF64Load, wasmir.InstrF64Store,
 			wasmir.InstrV128Load, wasmir.InstrV128Store,
+			wasmir.InstrV128Load8x8S, wasmir.InstrV128Load8x8U,
+			wasmir.InstrV128Load16x4S, wasmir.InstrV128Load16x4U,
+			wasmir.InstrV128Load32x2S, wasmir.InstrV128Load32x2U,
 			wasmir.InstrV128Load8Splat, wasmir.InstrV128Load16Splat,
-			wasmir.InstrV128Load32Splat, wasmir.InstrV128Load64Splat:
+			wasmir.InstrV128Load32Splat, wasmir.InstrV128Load64Splat,
+			wasmir.InstrV128Load32Zero, wasmir.InstrV128Load64Zero:
 			op.index = ins.MemoryIndex
 			op.bits = int64(ins.MemoryOffset)
 		case wasmir.InstrV128Load8Lane, wasmir.InstrV128Load16Lane,

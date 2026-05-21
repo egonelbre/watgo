@@ -50,7 +50,6 @@ var wasmSpecWasmvmDeniedScripts = []string{
 	"scripts/relaxed-simd/",
 
 	"scripts/bulk-memory/table_init.wast", // gc-related
-	"scripts/simd/simd_align.wast",
 	"scripts/simd/simd_conversions.wast",
 	"scripts/simd/simd_f32x4_pmin_pmax.wast",
 	"scripts/simd/simd_f32x4_rounding.wast",
@@ -69,8 +68,6 @@ var wasmSpecWasmvmDeniedScripts = []string{
 	"scripts/simd/simd_i64x2_extmul_i32x4.wast",
 	"scripts/simd/simd_i8x16_arith2.wast",
 	"scripts/simd/simd_int_to_int_extend.wast",
-	"scripts/simd/simd_load_extend.wast",
-	"scripts/simd/simd_load_zero.wast",
 }
 
 type wasmSpecWasmvmRunner struct {

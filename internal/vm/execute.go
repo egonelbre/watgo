@@ -554,6 +554,34 @@ func (e *executor) run() ([]Value, error) {
 				return nil, e.instructionError(err)
 			}
 			e.push(Value{Type: wasmir.ValueTypeV128, V128: value})
+		case wasmir.InstrV128Load8x8S, wasmir.InstrV128Load8x8U,
+			wasmir.InstrV128Load16x4S, wasmir.InstrV128Load16x4U,
+			wasmir.InstrV128Load32x2S, wasmir.InstrV128Load32x2U:
+			if e.inst == nil {
+				return nil, e.instructionError(fmt.Errorf("instance is nil"))
+			}
+			effective, err := e.popMemoryAddress(ins.index, uint64(ins.bits))
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			value, err := e.evalV128LoadExtend(ins.kind, ins.index, effective)
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			e.push(Value{Type: wasmir.ValueTypeV128, V128: value})
+		case wasmir.InstrV128Load32Zero, wasmir.InstrV128Load64Zero:
+			if e.inst == nil {
+				return nil, e.instructionError(fmt.Errorf("instance is nil"))
+			}
+			effective, err := e.popMemoryAddress(ins.index, uint64(ins.bits))
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			value, err := e.evalV128LoadZero(ins.kind, ins.index, effective)
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			e.push(Value{Type: wasmir.ValueTypeV128, V128: value})
 		case wasmir.InstrV128Load8Lane, wasmir.InstrV128Load16Lane,
 			wasmir.InstrV128Load32Lane, wasmir.InstrV128Load64Lane:
 			value, err := e.evalV128LoadLane(ins.kind, ins.index)
@@ -2360,6 +2388,46 @@ func (e *executor) evalV128LoadSplat(kind wasmir.InstrKind, memoryIndex uint32, 
 	return splatV128(width, raw), nil
 }
 
+// evalV128LoadExtend evaluates one SIMD load-and-extend instruction.
+func (e *executor) evalV128LoadExtend(kind wasmir.InstrKind, memoryIndex uint32, address uint64) ([16]byte, error) {
+	sourceWidth, resultWidth, signed := v128LoadExtendShape(kind)
+	if sourceWidth == 0 {
+		return [16]byte{}, fmt.Errorf("unsupported load extend instruction %s", instrName(kind))
+	}
+	bytes, err := e.inst.memory(memoryIndex, address, 8)
+	if err != nil {
+		return [16]byte{}, err
+	}
+	var out [16]byte
+	for src, dst := 0, 0; src < len(bytes); src, dst = src+int(sourceWidth), dst+int(resultWidth) {
+		raw := v128LoadLaneRaw(bytes[src:src+int(sourceWidth)], sourceWidth, signed)
+		switch resultWidth {
+		case 2:
+			binary.LittleEndian.PutUint16(out[dst:dst+2], uint16(raw))
+		case 4:
+			binary.LittleEndian.PutUint32(out[dst:dst+4], uint32(raw))
+		case 8:
+			binary.LittleEndian.PutUint64(out[dst:dst+8], raw)
+		}
+	}
+	return out, nil
+}
+
+// evalV128LoadZero evaluates one SIMD load-and-zero instruction.
+func (e *executor) evalV128LoadZero(kind wasmir.InstrKind, memoryIndex uint32, address uint64) ([16]byte, error) {
+	width := v128LoadZeroWidth(kind)
+	if width == 0 {
+		return [16]byte{}, fmt.Errorf("unsupported load zero instruction %s", instrName(kind))
+	}
+	bytes, err := e.inst.memory(memoryIndex, address, uint64(width))
+	if err != nil {
+		return [16]byte{}, err
+	}
+	var out [16]byte
+	copy(out[:], bytes)
+	return out, nil
+}
+
 // evalV128LoadLane evaluates one SIMD lane-load instruction.
 func (e *executor) evalV128LoadLane(kind wasmir.InstrKind, immediateIndex uint32) ([16]byte, error) {
 	if e.inst == nil {
@@ -3544,6 +3612,40 @@ func v128LoadSplatWidth(kind wasmir.InstrKind) uint32 {
 	}
 }
 
+// v128LoadExtendShape returns the source lane width, result lane width, and
+// signedness for a SIMD load-and-extend instruction.
+func v128LoadExtendShape(kind wasmir.InstrKind) (uint32, uint32, bool) {
+	switch kind {
+	case wasmir.InstrV128Load8x8S:
+		return 1, 2, true
+	case wasmir.InstrV128Load8x8U:
+		return 1, 2, false
+	case wasmir.InstrV128Load16x4S:
+		return 2, 4, true
+	case wasmir.InstrV128Load16x4U:
+		return 2, 4, false
+	case wasmir.InstrV128Load32x2S:
+		return 4, 8, true
+	case wasmir.InstrV128Load32x2U:
+		return 4, 8, false
+	default:
+		return 0, 0, false
+	}
+}
+
+// v128LoadZeroWidth returns the byte width read by a SIMD load-and-zero
+// instruction.
+func v128LoadZeroWidth(kind wasmir.InstrKind) uint32 {
+	switch kind {
+	case wasmir.InstrV128Load32Zero:
+		return 4
+	case wasmir.InstrV128Load64Zero:
+		return 8
+	default:
+		return 0
+	}
+}
+
 // v128LaneMemoryWidth returns the byte width copied by a SIMD lane memory
 // instruction.
 func v128LaneMemoryWidth(kind wasmir.InstrKind) uint32 {
@@ -3558,6 +3660,32 @@ func v128LaneMemoryWidth(kind wasmir.InstrKind) uint32 {
 		return 8
 	default:
 		return 0
+	}
+}
+
+// v128LoadLaneRaw reads one little-endian lane and applies sign extension when
+// signed is true.
+func v128LoadLaneRaw(bytes []byte, width uint32, signed bool) uint64 {
+	switch width {
+	case 1:
+		if signed {
+			return uint64(int64(int8(bytes[0])))
+		}
+		return uint64(bytes[0])
+	case 2:
+		raw := binary.LittleEndian.Uint16(bytes)
+		if signed {
+			return uint64(int64(int16(raw)))
+		}
+		return uint64(raw)
+	case 4:
+		raw := binary.LittleEndian.Uint32(bytes)
+		if signed {
+			return uint64(int64(int32(raw)))
+		}
+		return uint64(raw)
+	default:
+		return binary.LittleEndian.Uint64(bytes)
 	}
 }
 
