@@ -51,18 +51,14 @@ var wasmSpecWasmvmDeniedScripts = []string{
 
 	"scripts/bulk-memory/table_init.wast", // gc-related
 	"scripts/simd/simd_conversions.wast",
-	"scripts/simd/simd_i16x8_arith2.wast",
 	"scripts/simd/simd_i16x8_extadd_pairwise_i8x16.wast",
 	"scripts/simd/simd_i16x8_extmul_i8x16.wast",
 	"scripts/simd/simd_i16x8_q15mulr_sat_s.wast",
-	"scripts/simd/simd_i32x4_arith2.wast",
 	"scripts/simd/simd_i32x4_dot_i16x8.wast",
 	"scripts/simd/simd_i32x4_extadd_pairwise_i16x8.wast",
 	"scripts/simd/simd_i32x4_extmul_i16x8.wast",
 	"scripts/simd/simd_i32x4_trunc_sat_f64x2.wast",
-	"scripts/simd/simd_i64x2_arith2.wast",
 	"scripts/simd/simd_i64x2_extmul_i32x4.wast",
-	"scripts/simd/simd_i8x16_arith2.wast",
 	"scripts/simd/simd_int_to_int_extend.wast",
 }
 

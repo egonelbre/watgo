@@ -970,7 +970,10 @@ func (e *executor) run() ([]Value, error) {
 			}
 			e.push(Value{Type: wasmir.ValueTypeI32, I32: value})
 		case wasmir.InstrV128Not,
-			wasmir.InstrI8x16Neg, wasmir.InstrI16x8Neg, wasmir.InstrI32x4Neg, wasmir.InstrI64x2Neg,
+			wasmir.InstrI8x16Abs, wasmir.InstrI8x16Popcnt, wasmir.InstrI8x16Neg,
+			wasmir.InstrI16x8Abs, wasmir.InstrI16x8Neg,
+			wasmir.InstrI32x4Abs, wasmir.InstrI32x4Neg,
+			wasmir.InstrI64x2Abs, wasmir.InstrI64x2Neg,
 			wasmir.InstrF32x4Abs, wasmir.InstrF32x4Neg, wasmir.InstrF32x4Sqrt,
 			wasmir.InstrF32x4Ceil, wasmir.InstrF32x4Floor, wasmir.InstrF32x4Trunc, wasmir.InstrF32x4Nearest,
 			wasmir.InstrF64x2Abs, wasmir.InstrF64x2Neg, wasmir.InstrF64x2Sqrt,
@@ -986,9 +989,12 @@ func (e *executor) run() ([]Value, error) {
 			wasmir.InstrV128And, wasmir.InstrV128AndNot, wasmir.InstrV128Or, wasmir.InstrV128Xor,
 			wasmir.InstrI8x16Add, wasmir.InstrI8x16AddSatS, wasmir.InstrI8x16AddSatU,
 			wasmir.InstrI8x16Sub, wasmir.InstrI8x16SubSatS, wasmir.InstrI8x16SubSatU,
+			wasmir.InstrI8x16MinS, wasmir.InstrI8x16MinU, wasmir.InstrI8x16MaxS, wasmir.InstrI8x16MaxU, wasmir.InstrI8x16AvgrU,
 			wasmir.InstrI16x8Add, wasmir.InstrI16x8AddSatS, wasmir.InstrI16x8AddSatU,
 			wasmir.InstrI16x8Sub, wasmir.InstrI16x8SubSatS, wasmir.InstrI16x8SubSatU, wasmir.InstrI16x8Mul,
+			wasmir.InstrI16x8MinS, wasmir.InstrI16x8MinU, wasmir.InstrI16x8MaxS, wasmir.InstrI16x8MaxU, wasmir.InstrI16x8AvgrU,
 			wasmir.InstrI32x4Add, wasmir.InstrI32x4Sub, wasmir.InstrI32x4Mul,
+			wasmir.InstrI32x4MinS, wasmir.InstrI32x4MinU, wasmir.InstrI32x4MaxS, wasmir.InstrI32x4MaxU,
 			wasmir.InstrI64x2Add, wasmir.InstrI64x2Sub, wasmir.InstrI64x2Mul,
 			wasmir.InstrF32x4Min, wasmir.InstrF32x4Max, wasmir.InstrF32x4Pmin, wasmir.InstrF32x4Pmax,
 			wasmir.InstrF32x4Add, wasmir.InstrF32x4Sub, wasmir.InstrF32x4Div, wasmir.InstrF32x4Mul,
@@ -2788,12 +2794,22 @@ func (e *executor) evalV128Unary(kind wasmir.InstrKind) ([16]byte, error) {
 	switch kind {
 	case wasmir.InstrV128Not:
 		return notV128(vec), nil
+	case wasmir.InstrI8x16Abs:
+		return absI8x16(vec), nil
+	case wasmir.InstrI8x16Popcnt:
+		return popcntI8x16(vec), nil
 	case wasmir.InstrI8x16Neg:
 		return negI8x16(vec), nil
+	case wasmir.InstrI16x8Abs:
+		return absI16x8(vec), nil
 	case wasmir.InstrI16x8Neg:
 		return negI16x8(vec), nil
+	case wasmir.InstrI32x4Abs:
+		return absI32x4(vec), nil
 	case wasmir.InstrI32x4Neg:
 		return negI32x4(vec), nil
+	case wasmir.InstrI64x2Abs:
+		return absI64x2(vec), nil
 	case wasmir.InstrI64x2Neg:
 		return negI64x2(vec), nil
 	case wasmir.InstrF32x4Abs, wasmir.InstrF32x4Neg, wasmir.InstrF32x4Sqrt,
@@ -2829,12 +2845,15 @@ func (e *executor) evalV128Binary(kind wasmir.InstrKind) ([16]byte, error) {
 	case wasmir.InstrV128And, wasmir.InstrV128AndNot, wasmir.InstrV128Or, wasmir.InstrV128Xor:
 		return bitwiseV128(kind, lhs, rhs), nil
 	case wasmir.InstrI8x16Add, wasmir.InstrI8x16AddSatS, wasmir.InstrI8x16AddSatU,
-		wasmir.InstrI8x16Sub, wasmir.InstrI8x16SubSatS, wasmir.InstrI8x16SubSatU:
+		wasmir.InstrI8x16Sub, wasmir.InstrI8x16SubSatS, wasmir.InstrI8x16SubSatU,
+		wasmir.InstrI8x16MinS, wasmir.InstrI8x16MinU, wasmir.InstrI8x16MaxS, wasmir.InstrI8x16MaxU, wasmir.InstrI8x16AvgrU:
 		return binaryI8x16(kind, lhs, rhs), nil
 	case wasmir.InstrI16x8Add, wasmir.InstrI16x8AddSatS, wasmir.InstrI16x8AddSatU,
-		wasmir.InstrI16x8Sub, wasmir.InstrI16x8SubSatS, wasmir.InstrI16x8SubSatU, wasmir.InstrI16x8Mul:
+		wasmir.InstrI16x8Sub, wasmir.InstrI16x8SubSatS, wasmir.InstrI16x8SubSatU, wasmir.InstrI16x8Mul,
+		wasmir.InstrI16x8MinS, wasmir.InstrI16x8MinU, wasmir.InstrI16x8MaxS, wasmir.InstrI16x8MaxU, wasmir.InstrI16x8AvgrU:
 		return binaryI16x8(kind, lhs, rhs), nil
-	case wasmir.InstrI32x4Add, wasmir.InstrI32x4Sub, wasmir.InstrI32x4Mul:
+	case wasmir.InstrI32x4Add, wasmir.InstrI32x4Sub, wasmir.InstrI32x4Mul,
+		wasmir.InstrI32x4MinS, wasmir.InstrI32x4MinU, wasmir.InstrI32x4MaxS, wasmir.InstrI32x4MaxU:
 		return binaryI32x4(kind, lhs, rhs), nil
 	case wasmir.InstrI64x2Add, wasmir.InstrI64x2Sub, wasmir.InstrI64x2Mul:
 		return binaryI64x2(kind, lhs, rhs), nil
@@ -3029,12 +3048,50 @@ func negI8x16(vec [16]byte) [16]byte {
 	return out
 }
 
+// absI8x16 computes the absolute value of each signed i8 lane with wrapping
+// arithmetic.
+func absI8x16(vec [16]byte) [16]byte {
+	var out [16]byte
+	for i, b := range vec {
+		v := int8(b)
+		if v < 0 {
+			out[i] = byte(0 - uint8(b))
+		} else {
+			out[i] = b
+		}
+	}
+	return out
+}
+
+// popcntI8x16 counts the set bits in each i8 lane.
+func popcntI8x16(vec [16]byte) [16]byte {
+	var out [16]byte
+	for i, b := range vec {
+		out[i] = byte(bits.OnesCount8(b))
+	}
+	return out
+}
+
 // negI16x8 negates each i16 lane with wrapping arithmetic.
 func negI16x8(vec [16]byte) [16]byte {
 	var out [16]byte
 	for i := 0; i < len(out); i += 2 {
 		raw := binary.LittleEndian.Uint16(vec[i : i+2])
 		binary.LittleEndian.PutUint16(out[i:i+2], 0-raw)
+	}
+	return out
+}
+
+// absI16x8 computes the absolute value of each signed i16 lane with wrapping
+// arithmetic.
+func absI16x8(vec [16]byte) [16]byte {
+	var out [16]byte
+	for i := 0; i < len(out); i += 2 {
+		raw := binary.LittleEndian.Uint16(vec[i : i+2])
+		if int16(raw) < 0 {
+			raw = 0 - raw
+		}
+		binary.LittleEndian.PutUint16(out[i:i+2], raw)
 	}
 	return out
 }
@@ -3049,12 +3106,40 @@ func negI32x4(vec [16]byte) [16]byte {
 	return out
 }
 
+// absI32x4 computes the absolute value of each signed i32 lane with wrapping
+// arithmetic.
+func absI32x4(vec [16]byte) [16]byte {
+	var out [16]byte
+	for i := 0; i < len(out); i += 4 {
+		raw := binary.LittleEndian.Uint32(vec[i : i+4])
+		if int32(raw) < 0 {
+			raw = 0 - raw
+		}
+		binary.LittleEndian.PutUint32(out[i:i+4], raw)
+	}
+	return out
+}
+
 // negI64x2 negates each i64 lane with wrapping arithmetic.
 func negI64x2(vec [16]byte) [16]byte {
 	var out [16]byte
 	for i := 0; i < len(out); i += 8 {
 		raw := binary.LittleEndian.Uint64(vec[i : i+8])
 		binary.LittleEndian.PutUint64(out[i:i+8], 0-raw)
+	}
+	return out
+}
+
+// absI64x2 computes the absolute value of each signed i64 lane with wrapping
+// arithmetic.
+func absI64x2(vec [16]byte) [16]byte {
+	var out [16]byte
+	for i := 0; i < len(out); i += 8 {
+		raw := binary.LittleEndian.Uint64(vec[i : i+8])
+		if int64(raw) < 0 {
+			raw = 0 - raw
+		}
+		binary.LittleEndian.PutUint64(out[i:i+8], raw)
 	}
 	return out
 }
@@ -3205,6 +3290,16 @@ func binaryI8x16(kind wasmir.InstrKind, lhs [16]byte, rhs [16]byte) [16]byte {
 			out[i] = byte(int8(clampInt(int(int8(a))-int(int8(b)), -128, 127)))
 		case wasmir.InstrI8x16SubSatU:
 			out[i] = byte(clampInt(int(a)-int(b), 0, 255))
+		case wasmir.InstrI8x16MinS:
+			out[i] = byte(min(int8(a), int8(b)))
+		case wasmir.InstrI8x16MinU:
+			out[i] = min(a, b)
+		case wasmir.InstrI8x16MaxS:
+			out[i] = byte(max(int8(a), int8(b)))
+		case wasmir.InstrI8x16MaxU:
+			out[i] = max(a, b)
+		case wasmir.InstrI8x16AvgrU:
+			out[i] = byte((uint16(a) + uint16(b) + 1) / 2)
 		}
 	}
 	return out
@@ -3232,6 +3327,16 @@ func binaryI16x8(kind wasmir.InstrKind, lhs [16]byte, rhs [16]byte) [16]byte {
 			result = uint16(int16(clampInt(int(int16(a))-int(int16(b)), -32768, 32767)))
 		case wasmir.InstrI16x8SubSatU:
 			result = uint16(clampInt(int(a)-int(b), 0, 65535))
+		case wasmir.InstrI16x8MinS:
+			result = uint16(min(int16(a), int16(b)))
+		case wasmir.InstrI16x8MinU:
+			result = min(a, b)
+		case wasmir.InstrI16x8MaxS:
+			result = uint16(max(int16(a), int16(b)))
+		case wasmir.InstrI16x8MaxU:
+			result = max(a, b)
+		case wasmir.InstrI16x8AvgrU:
+			result = uint16((uint32(a) + uint32(b) + 1) / 2)
 		}
 		binary.LittleEndian.PutUint16(out[i:i+2], result)
 	}
@@ -3252,6 +3357,14 @@ func binaryI32x4(kind wasmir.InstrKind, lhs [16]byte, rhs [16]byte) [16]byte {
 			result = a - b
 		case wasmir.InstrI32x4Mul:
 			result = a * b
+		case wasmir.InstrI32x4MinS:
+			result = uint32(min(int32(a), int32(b)))
+		case wasmir.InstrI32x4MinU:
+			result = min(a, b)
+		case wasmir.InstrI32x4MaxS:
+			result = uint32(max(int32(a), int32(b)))
+		case wasmir.InstrI32x4MaxU:
+			result = max(a, b)
 		}
 		binary.LittleEndian.PutUint32(out[i:i+4], result)
 	}
