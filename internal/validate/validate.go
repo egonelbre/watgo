@@ -3945,13 +3945,15 @@ func (v *bodyValidator) validate() diag.ErrorList {
 			}
 			truncateStack(len(stack) - 2)
 			appendStackType(wasmir.ValueTypeV128)
-		case wasmir.InstrI8x16NarrowI16x8S, wasmir.InstrI8x16NarrowI16x8U,
+		case wasmir.InstrI8x16RelaxedSwizzle,
+			wasmir.InstrI8x16NarrowI16x8S, wasmir.InstrI8x16NarrowI16x8U,
 			wasmir.InstrI16x8Eq, wasmir.InstrI16x8Ne, wasmir.InstrI16x8LtS, wasmir.InstrI16x8LtU, wasmir.InstrI16x8GtS, wasmir.InstrI16x8GtU, wasmir.InstrI16x8LeS, wasmir.InstrI16x8LeU, wasmir.InstrI16x8GeS, wasmir.InstrI16x8GeU,
 			wasmir.InstrI16x8NarrowI32x4S, wasmir.InstrI16x8NarrowI32x4U,
 			wasmir.InstrI16x8Add, wasmir.InstrI16x8AddSatS, wasmir.InstrI16x8AddSatU,
 			wasmir.InstrI16x8Sub, wasmir.InstrI16x8SubSatS, wasmir.InstrI16x8SubSatU,
 			wasmir.InstrI16x8Mul, wasmir.InstrI16x8MinS, wasmir.InstrI16x8MinU, wasmir.InstrI16x8MaxS, wasmir.InstrI16x8MaxU, wasmir.InstrI16x8AvgrU,
 			wasmir.InstrI16x8Q15mulrSatS,
+			wasmir.InstrI16x8RelaxedQ15mulrS, wasmir.InstrI16x8RelaxedDotI8x16I7x16S,
 			wasmir.InstrI16x8ExtmulLowI8x16S, wasmir.InstrI16x8ExtmulHighI8x16S, wasmir.InstrI16x8ExtmulLowI8x16U, wasmir.InstrI16x8ExtmulHighI8x16U,
 			wasmir.InstrI32x4Eq, wasmir.InstrI32x4Ne, wasmir.InstrI32x4LtS, wasmir.InstrI32x4LtU, wasmir.InstrI32x4GtS, wasmir.InstrI32x4GtU, wasmir.InstrI32x4LeS, wasmir.InstrI32x4LeU, wasmir.InstrI32x4GeS, wasmir.InstrI32x4GeU,
 			wasmir.InstrI32x4Add, wasmir.InstrI32x4Sub, wasmir.InstrI32x4Mul, wasmir.InstrI32x4MinS, wasmir.InstrI32x4MinU, wasmir.InstrI32x4MaxS, wasmir.InstrI32x4MaxU,
@@ -3962,8 +3964,10 @@ func (v *bodyValidator) validate() diag.ErrorList {
 			wasmir.InstrI64x2ExtmulLowI32x4S, wasmir.InstrI64x2ExtmulHighI32x4S, wasmir.InstrI64x2ExtmulLowI32x4U, wasmir.InstrI64x2ExtmulHighI32x4U,
 			wasmir.InstrF32x4Eq, wasmir.InstrF32x4Ne, wasmir.InstrF32x4Lt, wasmir.InstrF32x4Gt, wasmir.InstrF32x4Le, wasmir.InstrF32x4Ge,
 			wasmir.InstrF32x4Add, wasmir.InstrF32x4Sub, wasmir.InstrF32x4Mul, wasmir.InstrF32x4Div, wasmir.InstrF32x4Min, wasmir.InstrF32x4Max, wasmir.InstrF32x4Pmin, wasmir.InstrF32x4Pmax,
+			wasmir.InstrF32x4RelaxedMin, wasmir.InstrF32x4RelaxedMax,
 			wasmir.InstrF64x2Eq, wasmir.InstrF64x2Ne, wasmir.InstrF64x2Lt, wasmir.InstrF64x2Gt, wasmir.InstrF64x2Le, wasmir.InstrF64x2Ge,
-			wasmir.InstrF64x2Add, wasmir.InstrF64x2Sub, wasmir.InstrF64x2Mul, wasmir.InstrF64x2Div, wasmir.InstrF64x2Min, wasmir.InstrF64x2Max, wasmir.InstrF64x2Pmin, wasmir.InstrF64x2Pmax:
+			wasmir.InstrF64x2Add, wasmir.InstrF64x2Sub, wasmir.InstrF64x2Mul, wasmir.InstrF64x2Div, wasmir.InstrF64x2Min, wasmir.InstrF64x2Max, wasmir.InstrF64x2Pmin, wasmir.InstrF64x2Pmax,
+			wasmir.InstrF64x2RelaxedMin, wasmir.InstrF64x2RelaxedMax:
 			name := instrName(ins.Kind)
 			if !ensureCurrentFrameOperands(2, int(hint.ExplicitInstrArgs), int(hint.BottomInstrArgs)) {
 				diags.Addf("%s: %s needs 2 operands", insCtx, name)
@@ -3993,6 +3997,8 @@ func (v *bodyValidator) validate() diag.ErrorList {
 			wasmir.InstrF64x2ConvertLowI32x4S, wasmir.InstrF64x2ConvertLowI32x4U,
 			wasmir.InstrF32x4DemoteF64x2Zero, wasmir.InstrF64x2PromoteLowF32x4,
 			wasmir.InstrI32x4TruncSatF64x2SZero, wasmir.InstrI32x4TruncSatF64x2UZero,
+			wasmir.InstrI32x4RelaxedTruncF32x4S, wasmir.InstrI32x4RelaxedTruncF32x4U,
+			wasmir.InstrI32x4RelaxedTruncF64x2SZero, wasmir.InstrI32x4RelaxedTruncF64x2UZero,
 			wasmir.InstrI32x4Neg, wasmir.InstrI64x2Neg:
 			name := instrName(ins.Kind)
 			if !ensureCurrentFrameOperands(1, int(hint.ExplicitInstrArgs), int(hint.BottomInstrArgs)) {
@@ -4003,13 +4009,19 @@ func (v *bodyValidator) validate() diag.ErrorList {
 				diags.Addf("%s: %s expects v128 operand", insCtx, name)
 				continue
 			}
-		case wasmir.InstrV128Bitselect:
+		case wasmir.InstrV128Bitselect,
+			wasmir.InstrI8x16RelaxedLaneselect, wasmir.InstrI16x8RelaxedLaneselect,
+			wasmir.InstrI32x4RelaxedLaneselect, wasmir.InstrI64x2RelaxedLaneselect,
+			wasmir.InstrF32x4RelaxedMadd, wasmir.InstrF32x4RelaxedNmadd,
+			wasmir.InstrF64x2RelaxedMadd, wasmir.InstrF64x2RelaxedNmadd,
+			wasmir.InstrI32x4RelaxedDotI8x16I7x16AddS:
+			name := instrName(ins.Kind)
 			if !ensureCurrentFrameOperands(3, int(hint.ExplicitInstrArgs), int(hint.BottomInstrArgs)) {
-				diags.Addf("%s: v128.bitselect needs 3 operands", insCtx)
+				diags.Addf("%s: %s needs 3 operands", insCtx, name)
 				continue
 			}
 			if !stackValueHasType(len(stack)-1, wasmir.ValueTypeV128) || !stackValueHasType(len(stack)-2, wasmir.ValueTypeV128) || !stackValueHasType(len(stack)-3, wasmir.ValueTypeV128) {
-				diags.Addf("%s: v128.bitselect expects v128 operands", insCtx)
+				diags.Addf("%s: %s expects v128 operands", insCtx, name)
 				continue
 			}
 			truncateStack(len(stack) - 3)

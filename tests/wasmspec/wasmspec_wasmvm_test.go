@@ -47,8 +47,6 @@ var wasmSpecWasmvmDeniedScripts = []string{
 	"scripts/gc/struct.wast",
 	"scripts/gc/type-subtyping.wast",
 
-	"scripts/relaxed-simd/",
-
 	"scripts/bulk-memory/table_init.wast", // gc-related
 }
 

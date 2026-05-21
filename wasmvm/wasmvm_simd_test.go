@@ -708,6 +708,52 @@ func TestV128Binary(t *testing.T) {
 	checkV128Export(t, inst, "swizzle", v128I32x4(0x0d090501, 0x020e0a06, 0x03070f0b, 0x0c080410))
 }
 
+// TestV128Relaxed checks the deterministic relaxed SIMD choices implemented
+// by the VM.
+func TestV128Relaxed(t *testing.T) {
+	rt := wasmvm.NewRuntime()
+	inst, err := rt.Instantiate(parseWAT(t, `
+		(module
+			(func (export "relaxed_swizzle") (result v128)
+				v128.const i8x16 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+				v128.const i8x16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1 0
+				i8x16.relaxed_swizzle)
+			(func (export "relaxed_q15") (result v128)
+				v128.const i16x8 -32768 -32767 32767 0 0 0 0 0
+				v128.const i16x8 -32768 -32768 32767 0 0 0 0 0
+				i16x8.relaxed_q15mulr_s)
+			(func (export "relaxed_dot") (result v128)
+				v128.const i8x16 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+				v128.const i8x16 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+				i16x8.relaxed_dot_i8x16_i7x16_s)
+			(func (export "relaxed_laneselect") (result v128)
+				v128.const i32x4 0 1 0x12341234 0x12341234
+				v128.const i32x4 4 5 0x56785678 0x56785678
+				v128.const i32x4 -1 0 0xffff0000 0x0000ffff
+				i32x4.relaxed_laneselect)
+			(func (export "relaxed_madd") (result v128)
+				v128.const f32x4 2.0 3.0 4.0 5.0
+				v128.const f32x4 3.0 4.0 5.0 6.0
+				v128.const f32x4 4.0 5.0 6.0 7.0
+				f32x4.relaxed_madd)
+			(func (export "relaxed_dot_add") (result v128)
+				v128.const i8x16 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+				v128.const i8x16 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+				v128.const i32x4 0 1 2 3
+				i32x4.relaxed_dot_i8x16_i7x16_add_s))
+	`), nil)
+	if err != nil {
+		t.Fatalf("Instantiate failed: %v", err)
+	}
+
+	checkV128Export(t, inst, "relaxed_swizzle", v128I32x4(0x0c0d0e0f, 0x08090a0b, 0x04050607, 0x00010203))
+	checkV128Export(t, inst, "relaxed_q15", v128I32x4(0x7fff7fff, 0x00007ffe, 0x00000000, 0x00000000))
+	checkV128Export(t, inst, "relaxed_dot", v128I32x4(0x000d0001, 0x00550029, 0x00dd0091, 0x01a50139))
+	checkV128Export(t, inst, "relaxed_laneselect", v128I32x4(0x00000000, 0x00000005, 0x12345678, 0x56781234))
+	checkV128Export(t, inst, "relaxed_madd", v128I32x4(0x41200000, 0x41880000, 0x41d00000, 0x42140000))
+	checkV128Export(t, inst, "relaxed_dot_add", v128I32x4(0x0000000e, 0x0000007f, 0x00000170, 0x000002e1))
+}
+
 // v128I32x4 builds the byte representation of a v128 value from i32 lanes.
 func v128I32x4(l0, l1, l2, l3 uint32) [16]byte {
 	return [16]byte{

@@ -990,13 +990,15 @@ func (e *executor) run() ([]Value, error) {
 			wasmir.InstrF64x2ConvertLowI32x4S, wasmir.InstrF64x2ConvertLowI32x4U,
 			wasmir.InstrF32x4DemoteF64x2Zero, wasmir.InstrF64x2PromoteLowF32x4,
 			wasmir.InstrI32x4TruncSatF32x4S, wasmir.InstrI32x4TruncSatF32x4U,
-			wasmir.InstrI32x4TruncSatF64x2SZero, wasmir.InstrI32x4TruncSatF64x2UZero:
+			wasmir.InstrI32x4TruncSatF64x2SZero, wasmir.InstrI32x4TruncSatF64x2UZero,
+			wasmir.InstrI32x4RelaxedTruncF32x4S, wasmir.InstrI32x4RelaxedTruncF32x4U,
+			wasmir.InstrI32x4RelaxedTruncF64x2SZero, wasmir.InstrI32x4RelaxedTruncF64x2UZero:
 			value, err := e.evalV128Unary(ins.kind)
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
 			e.push(Value{Type: wasmir.ValueTypeV128, V128: value})
-		case wasmir.InstrI8x16Swizzle,
+		case wasmir.InstrI8x16Swizzle, wasmir.InstrI8x16RelaxedSwizzle,
 			wasmir.InstrV128And, wasmir.InstrV128AndNot, wasmir.InstrV128Or, wasmir.InstrV128Xor,
 			wasmir.InstrI8x16NarrowI16x8S, wasmir.InstrI8x16NarrowI16x8U,
 			wasmir.InstrI8x16Add, wasmir.InstrI8x16AddSatS, wasmir.InstrI8x16AddSatU,
@@ -1007,6 +1009,7 @@ func (e *executor) run() ([]Value, error) {
 			wasmir.InstrI16x8Sub, wasmir.InstrI16x8SubSatS, wasmir.InstrI16x8SubSatU, wasmir.InstrI16x8Mul,
 			wasmir.InstrI16x8MinS, wasmir.InstrI16x8MinU, wasmir.InstrI16x8MaxS, wasmir.InstrI16x8MaxU, wasmir.InstrI16x8AvgrU,
 			wasmir.InstrI16x8Q15mulrSatS,
+			wasmir.InstrI16x8RelaxedQ15mulrS, wasmir.InstrI16x8RelaxedDotI8x16I7x16S,
 			wasmir.InstrI16x8ExtmulLowI8x16S, wasmir.InstrI16x8ExtmulHighI8x16S,
 			wasmir.InstrI16x8ExtmulLowI8x16U, wasmir.InstrI16x8ExtmulHighI8x16U,
 			wasmir.InstrI32x4Add, wasmir.InstrI32x4Sub, wasmir.InstrI32x4Mul,
@@ -1018,8 +1021,10 @@ func (e *executor) run() ([]Value, error) {
 			wasmir.InstrI64x2ExtmulLowI32x4S, wasmir.InstrI64x2ExtmulHighI32x4S,
 			wasmir.InstrI64x2ExtmulLowI32x4U, wasmir.InstrI64x2ExtmulHighI32x4U,
 			wasmir.InstrF32x4Min, wasmir.InstrF32x4Max, wasmir.InstrF32x4Pmin, wasmir.InstrF32x4Pmax,
+			wasmir.InstrF32x4RelaxedMin, wasmir.InstrF32x4RelaxedMax,
 			wasmir.InstrF32x4Add, wasmir.InstrF32x4Sub, wasmir.InstrF32x4Div, wasmir.InstrF32x4Mul,
 			wasmir.InstrF64x2Min, wasmir.InstrF64x2Max, wasmir.InstrF64x2Pmin, wasmir.InstrF64x2Pmax,
+			wasmir.InstrF64x2RelaxedMin, wasmir.InstrF64x2RelaxedMax,
 			wasmir.InstrF64x2Add, wasmir.InstrF64x2Sub, wasmir.InstrF64x2Div, wasmir.InstrF64x2Mul:
 			value, err := e.evalV128Binary(ins.kind)
 			if err != nil {
@@ -1035,8 +1040,13 @@ func (e *executor) run() ([]Value, error) {
 				return nil, e.instructionError(err)
 			}
 			e.push(Value{Type: wasmir.ValueTypeV128, V128: value})
-		case wasmir.InstrV128Bitselect:
-			value, err := e.evalV128Bitselect()
+		case wasmir.InstrV128Bitselect,
+			wasmir.InstrI8x16RelaxedLaneselect, wasmir.InstrI16x8RelaxedLaneselect,
+			wasmir.InstrI32x4RelaxedLaneselect, wasmir.InstrI64x2RelaxedLaneselect,
+			wasmir.InstrF32x4RelaxedMadd, wasmir.InstrF32x4RelaxedNmadd,
+			wasmir.InstrF64x2RelaxedMadd, wasmir.InstrF64x2RelaxedNmadd,
+			wasmir.InstrI32x4RelaxedDotI8x16I7x16AddS:
+			value, err := e.evalV128Ternary(ins.kind)
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
@@ -2751,9 +2761,10 @@ func (e *executor) evalV128Shift(kind wasmir.InstrKind) ([16]byte, error) {
 	}
 }
 
-// evalV128Bitselect evaluates v128.bitselect.
-func (e *executor) evalV128Bitselect() ([16]byte, error) {
-	mask, err := e.popV128()
+// evalV128Ternary evaluates one SIMD ternary instruction that returns a v128
+// result.
+func (e *executor) evalV128Ternary(kind wasmir.InstrKind) ([16]byte, error) {
+	c, err := e.popV128()
 	if err != nil {
 		return [16]byte{}, err
 	}
@@ -2766,11 +2777,29 @@ func (e *executor) evalV128Bitselect() ([16]byte, error) {
 		return [16]byte{}, err
 	}
 
+	switch kind {
+	case wasmir.InstrV128Bitselect,
+		wasmir.InstrI8x16RelaxedLaneselect, wasmir.InstrI16x8RelaxedLaneselect,
+		wasmir.InstrI32x4RelaxedLaneselect, wasmir.InstrI64x2RelaxedLaneselect:
+		return bitselectV128(a, b, c), nil
+	case wasmir.InstrF32x4RelaxedMadd, wasmir.InstrF32x4RelaxedNmadd:
+		return relaxedMaddF32x4(kind, a, b, c), nil
+	case wasmir.InstrF64x2RelaxedMadd, wasmir.InstrF64x2RelaxedNmadd:
+		return relaxedMaddF64x2(kind, a, b, c), nil
+	case wasmir.InstrI32x4RelaxedDotI8x16I7x16AddS:
+		return relaxedDotAddI8x16ToI32x4(a, b, c), nil
+	default:
+		return [16]byte{}, fmt.Errorf("unsupported SIMD ternary instruction %s", instrName(kind))
+	}
+}
+
+// bitselectV128 applies v128.bitselect semantics to a, b, and mask.
+func bitselectV128(a [16]byte, b [16]byte, mask [16]byte) [16]byte {
 	var out [16]byte
 	for i := range out {
 		out[i] = (a[i] & mask[i]) | (b[i] &^ mask[i])
 	}
-	return out, nil
+	return out
 }
 
 // evalV128Test evaluates a SIMD test instruction that returns an i32 result.
@@ -2860,9 +2889,11 @@ func (e *executor) evalV128Unary(kind wasmir.InstrKind) ([16]byte, error) {
 		return demoteF64x2ToF32x4Zero(vec), nil
 	case wasmir.InstrF64x2PromoteLowF32x4:
 		return promoteLowF32x4ToF64x2(vec), nil
-	case wasmir.InstrI32x4TruncSatF32x4S, wasmir.InstrI32x4TruncSatF32x4U:
+	case wasmir.InstrI32x4TruncSatF32x4S, wasmir.InstrI32x4TruncSatF32x4U,
+		wasmir.InstrI32x4RelaxedTruncF32x4S, wasmir.InstrI32x4RelaxedTruncF32x4U:
 		return truncSatF32x4ToI32x4(kind, vec), nil
-	case wasmir.InstrI32x4TruncSatF64x2SZero, wasmir.InstrI32x4TruncSatF64x2UZero:
+	case wasmir.InstrI32x4TruncSatF64x2SZero, wasmir.InstrI32x4TruncSatF64x2UZero,
+		wasmir.InstrI32x4RelaxedTruncF64x2SZero, wasmir.InstrI32x4RelaxedTruncF64x2UZero:
 		return truncSatF64x2ToI32x4Zero(kind, vec), nil
 	default:
 		return [16]byte{}, fmt.Errorf("unsupported SIMD unary instruction %s", instrName(kind))
@@ -2882,7 +2913,7 @@ func (e *executor) evalV128Binary(kind wasmir.InstrKind) ([16]byte, error) {
 	}
 
 	switch kind {
-	case wasmir.InstrI8x16Swizzle:
+	case wasmir.InstrI8x16Swizzle, wasmir.InstrI8x16RelaxedSwizzle:
 		return swizzleI8x16(lhs, rhs), nil
 	case wasmir.InstrV128And, wasmir.InstrV128AndNot, wasmir.InstrV128Or, wasmir.InstrV128Xor:
 		return bitwiseV128(kind, lhs, rhs), nil
@@ -2898,8 +2929,10 @@ func (e *executor) evalV128Binary(kind wasmir.InstrKind) ([16]byte, error) {
 		wasmir.InstrI16x8Sub, wasmir.InstrI16x8SubSatS, wasmir.InstrI16x8SubSatU, wasmir.InstrI16x8Mul,
 		wasmir.InstrI16x8MinS, wasmir.InstrI16x8MinU, wasmir.InstrI16x8MaxS, wasmir.InstrI16x8MaxU, wasmir.InstrI16x8AvgrU:
 		return binaryI16x8(kind, lhs, rhs), nil
-	case wasmir.InstrI16x8Q15mulrSatS:
+	case wasmir.InstrI16x8Q15mulrSatS, wasmir.InstrI16x8RelaxedQ15mulrS:
 		return q15mulrSatI16x8(lhs, rhs), nil
+	case wasmir.InstrI16x8RelaxedDotI8x16I7x16S:
+		return relaxedDotI8x16ToI16x8(lhs, rhs), nil
 	case wasmir.InstrI16x8ExtmulLowI8x16S, wasmir.InstrI16x8ExtmulHighI8x16S,
 		wasmir.InstrI16x8ExtmulLowI8x16U, wasmir.InstrI16x8ExtmulHighI8x16U:
 		return extmulI8x16ToI16x8(kind, lhs, rhs), nil
@@ -2917,9 +2950,11 @@ func (e *executor) evalV128Binary(kind wasmir.InstrKind) ([16]byte, error) {
 		wasmir.InstrI64x2ExtmulLowI32x4U, wasmir.InstrI64x2ExtmulHighI32x4U:
 		return extmulI32x4ToI64x2(kind, lhs, rhs), nil
 	case wasmir.InstrF32x4Min, wasmir.InstrF32x4Max, wasmir.InstrF32x4Pmin, wasmir.InstrF32x4Pmax,
+		wasmir.InstrF32x4RelaxedMin, wasmir.InstrF32x4RelaxedMax,
 		wasmir.InstrF32x4Add, wasmir.InstrF32x4Sub, wasmir.InstrF32x4Div, wasmir.InstrF32x4Mul:
 		return binaryF32x4(kind, lhs, rhs), nil
 	case wasmir.InstrF64x2Min, wasmir.InstrF64x2Max, wasmir.InstrF64x2Pmin, wasmir.InstrF64x2Pmax,
+		wasmir.InstrF64x2RelaxedMin, wasmir.InstrF64x2RelaxedMax,
 		wasmir.InstrF64x2Add, wasmir.InstrF64x2Sub, wasmir.InstrF64x2Div, wasmir.InstrF64x2Mul:
 		return binaryF64x2(kind, lhs, rhs), nil
 	default:
@@ -3438,9 +3473,9 @@ func truncSatF32x4ToI32x4(kind wasmir.InstrKind, vec [16]byte) [16]byte {
 		v := math.Float32frombits(binary.LittleEndian.Uint32(vec[i : i+4]))
 		var result int32
 		switch kind {
-		case wasmir.InstrI32x4TruncSatF32x4S:
+		case wasmir.InstrI32x4TruncSatF32x4S, wasmir.InstrI32x4RelaxedTruncF32x4S:
 			result = truncSatFloatToI32S(float64(v))
-		case wasmir.InstrI32x4TruncSatF32x4U:
+		case wasmir.InstrI32x4TruncSatF32x4U, wasmir.InstrI32x4RelaxedTruncF32x4U:
 			result = truncSatFloatToI32U(float64(v))
 		}
 		binary.LittleEndian.PutUint32(out[i:i+4], uint32(result))
@@ -3456,9 +3491,9 @@ func truncSatF64x2ToI32x4Zero(kind wasmir.InstrKind, vec [16]byte) [16]byte {
 		v := math.Float64frombits(binary.LittleEndian.Uint64(vec[lane*8 : lane*8+8]))
 		var result int32
 		switch kind {
-		case wasmir.InstrI32x4TruncSatF64x2SZero:
+		case wasmir.InstrI32x4TruncSatF64x2SZero, wasmir.InstrI32x4RelaxedTruncF64x2SZero:
 			result = truncSatFloatToI32S(v)
-		case wasmir.InstrI32x4TruncSatF64x2UZero:
+		case wasmir.InstrI32x4TruncSatF64x2UZero, wasmir.InstrI32x4RelaxedTruncF64x2UZero:
 			result = truncSatFloatToI32U(v)
 		}
 		binary.LittleEndian.PutUint32(out[lane*4:lane*4+4], uint32(result))
@@ -3796,6 +3831,37 @@ func dotI16x8ToI32x4(lhs [16]byte, rhs [16]byte) [16]byte {
 	return out
 }
 
+// relaxedDotI8x16ToI16x8 computes one deterministic relaxed dot-product
+// choice: signed i8 pairs accumulated into signed i16 lanes.
+func relaxedDotI8x16ToI16x8(lhs [16]byte, rhs [16]byte) [16]byte {
+	var out [16]byte
+	for lane := 0; lane < 8; lane++ {
+		i := lane * 2
+		a0 := int16(int8(lhs[i]))
+		b0 := int16(int8(rhs[i]))
+		a1 := int16(int8(lhs[i+1]))
+		b1 := int16(int8(rhs[i+1]))
+		binary.LittleEndian.PutUint16(out[lane*2:lane*2+2], uint16(a0*b0+a1*b1))
+	}
+	return out
+}
+
+// relaxedDotAddI8x16ToI32x4 computes one deterministic relaxed dot-add
+// choice: signed i8 groups accumulated into i32 lanes and added to acc.
+func relaxedDotAddI8x16ToI32x4(lhs [16]byte, rhs [16]byte, acc [16]byte) [16]byte {
+	var out [16]byte
+	for lane := 0; lane < 4; lane++ {
+		i := lane * 4
+		sum := int32(0)
+		for j := 0; j < 4; j++ {
+			sum += int32(int8(lhs[i+j])) * int32(int8(rhs[i+j]))
+		}
+		addend := binary.LittleEndian.Uint32(acc[lane*4 : lane*4+4])
+		binary.LittleEndian.PutUint32(out[lane*4:lane*4+4], uint32(sum)+addend)
+	}
+	return out
+}
+
 // binaryF32x4 applies one f32 binary operation to each lane.
 func binaryF32x4(kind wasmir.InstrKind, lhs [16]byte, rhs [16]byte) [16]byte {
 	var out [16]byte
@@ -3816,6 +3882,39 @@ func binaryF64x2(kind wasmir.InstrKind, lhs [16]byte, rhs [16]byte) [16]byte {
 		b := math.Float64frombits(binary.LittleEndian.Uint64(rhs[i : i+8]))
 		result := binaryF64(kind, a, b)
 		binary.LittleEndian.PutUint64(out[i:i+8], result)
+	}
+	return out
+}
+
+// relaxedMaddF32x4 computes one deterministic relaxed f32 multiply-add choice
+// with separate f32 multiply and add rounding.
+func relaxedMaddF32x4(kind wasmir.InstrKind, a [16]byte, b [16]byte, c [16]byte) [16]byte {
+	var out [16]byte
+	for i := 0; i < len(out); i += 4 {
+		av := math.Float32frombits(binary.LittleEndian.Uint32(a[i : i+4]))
+		bv := math.Float32frombits(binary.LittleEndian.Uint32(b[i : i+4]))
+		cv := math.Float32frombits(binary.LittleEndian.Uint32(c[i : i+4]))
+		product := av * bv
+		if kind == wasmir.InstrF32x4RelaxedNmadd {
+			product = -product
+		}
+		binary.LittleEndian.PutUint32(out[i:i+4], math.Float32bits(product+cv))
+	}
+	return out
+}
+
+// relaxedMaddF64x2 computes one deterministic relaxed f64 multiply-add choice
+// with separate multiply and add rounding.
+func relaxedMaddF64x2(kind wasmir.InstrKind, a [16]byte, b [16]byte, c [16]byte) [16]byte {
+	var out [16]byte
+	for i := 0; i < len(out); i += 8 {
+		product := math.Float64frombits(binary.LittleEndian.Uint64(a[i:i+8])) *
+			math.Float64frombits(binary.LittleEndian.Uint64(b[i:i+8]))
+		if kind == wasmir.InstrF64x2RelaxedNmadd {
+			product = -product
+		}
+		cv := math.Float64frombits(binary.LittleEndian.Uint64(c[i : i+8]))
+		binary.LittleEndian.PutUint64(out[i:i+8], math.Float64bits(product+cv))
 	}
 	return out
 }
@@ -3841,7 +3940,7 @@ func binaryF32(kind wasmir.InstrKind, a float32, b float32) uint32 {
 
 	var result float32
 	switch kind {
-	case wasmir.InstrF32Min, wasmir.InstrF32x4Min:
+	case wasmir.InstrF32Min, wasmir.InstrF32x4Min, wasmir.InstrF32x4RelaxedMin:
 		if a == 0 && b == 0 && (math.Signbit(float64(a)) || math.Signbit(float64(b))) {
 			return 0x80000000
 		}
@@ -3850,7 +3949,7 @@ func binaryF32(kind wasmir.InstrKind, a float32, b float32) uint32 {
 		} else {
 			result = b
 		}
-	case wasmir.InstrF32Max, wasmir.InstrF32x4Max:
+	case wasmir.InstrF32Max, wasmir.InstrF32x4Max, wasmir.InstrF32x4RelaxedMax:
 		if a == 0 && b == 0 && (!math.Signbit(float64(a)) || !math.Signbit(float64(b))) {
 			return 0
 		}
@@ -3895,7 +3994,7 @@ func binaryF64(kind wasmir.InstrKind, a float64, b float64) uint64 {
 
 	var result float64
 	switch kind {
-	case wasmir.InstrF64Min, wasmir.InstrF64x2Min:
+	case wasmir.InstrF64Min, wasmir.InstrF64x2Min, wasmir.InstrF64x2RelaxedMin:
 		if a == 0 && b == 0 && (math.Signbit(a) || math.Signbit(b)) {
 			return 0x8000000000000000
 		}
@@ -3904,7 +4003,7 @@ func binaryF64(kind wasmir.InstrKind, a float64, b float64) uint64 {
 		} else {
 			result = b
 		}
-	case wasmir.InstrF64Max, wasmir.InstrF64x2Max:
+	case wasmir.InstrF64Max, wasmir.InstrF64x2Max, wasmir.InstrF64x2RelaxedMax:
 		if a == 0 && b == 0 && (!math.Signbit(a) || !math.Signbit(b)) {
 			return 0
 		}
