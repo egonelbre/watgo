@@ -209,6 +209,9 @@ func compileFunction(m *wasmir.Module, fn *wasmir.Function) (*function, error) {
 			wasmir.InstrArrayNew, wasmir.InstrArrayNewDefault,
 			wasmir.InstrArrayLen:
 			op.index = ins.TypeIndex
+		case wasmir.InstrArrayNewFixed:
+			op.index = ins.TypeIndex
+			op.bits = int64(ins.FixedCount)
 		case wasmir.InstrStructGet, wasmir.InstrStructGetS, wasmir.InstrStructGetU,
 			wasmir.InstrStructSet:
 			op.index = ins.TypeIndex

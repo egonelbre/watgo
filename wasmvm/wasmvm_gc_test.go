@@ -315,3 +315,115 @@ func TestGCArrayNewLenAndGet(t *testing.T) {
 	expectI32Result(t, inst, "get_i16_s", -32767)
 	expectI32Result(t, inst, "default_i8", 0)
 }
+
+// TestGCStructSet checks that struct.set mutates a mutable field and that
+// packed fields are truncated before storage.
+func TestGCStructSet(t *testing.T) {
+	rt := wasmvm.NewRuntime()
+	inst, err := rt.Instantiate(parseWAT(t, `
+		(module
+			(type $s (struct (field i32) (field (mut i8))))
+
+			(func (export "set_i8") (result i32) (local (ref $s))
+				i32.const 11
+				i32.const 0
+				struct.new $s
+				local.tee 0
+				i32.const -1
+				struct.set $s 1
+				local.get 0
+				struct.get_u $s 1)
+			(func (export "set_i32") (result i32) (local (ref $s))
+				i32.const 41
+				i32.const 0
+				struct.new $s
+				local.set 0
+				local.get 0
+				i32.const 255
+				struct.set $s 1
+				local.get 0
+				struct.get_s $s 1))
+	`), nil)
+	if err != nil {
+		t.Fatalf("Instantiate failed: %v", err)
+	}
+
+	expectI32Result(t, inst, "set_i8", 255)
+	expectI32Result(t, inst, "set_i32", -1)
+}
+
+// TestGCArrayNewFixedAndSet checks array.new_fixed element order and array.set
+// mutation of a mutable packed element.
+func TestGCArrayNewFixedAndSet(t *testing.T) {
+	rt := wasmvm.NewRuntime()
+	inst, err := rt.Instantiate(parseWAT(t, `
+		(module
+			(type $a (array (mut i16)))
+
+			(func (export "get_fixed") (result i32) (local (ref $a))
+				i32.const 10
+				i32.const 20
+				i32.const 30
+				array.new_fixed $a 3
+				i32.const 1
+				array.get_s $a)
+			(func (export "set") (result i32) (local (ref $a))
+				i32.const 10
+				i32.const 20
+				i32.const 30
+				array.new_fixed $a 3
+				local.set 0
+				local.get 0
+				i32.const 2
+				i32.const 0x8001
+				array.set $a
+				local.get 0
+				i32.const 2
+				array.get_s $a))
+	`), nil)
+	if err != nil {
+		t.Fatalf("Instantiate failed: %v", err)
+	}
+
+	expectI32Result(t, inst, "get_fixed", 20)
+	expectI32Result(t, inst, "set", -32767)
+}
+
+// TestGCConstExprAggregateNew checks that struct and array allocations can be
+// used in module-level constant expressions such as global initializers.
+func TestGCConstExprAggregateNew(t *testing.T) {
+	rt := wasmvm.NewRuntime()
+	inst, err := rt.Instantiate(parseWAT(t, `
+		(module
+			(type $s (struct (field i32) (field (mut i32))))
+			(type $a (array i32))
+
+			(global $s1 (ref $s) (struct.new $s (i32.const 7) (i32.const 11)))
+			(global $s2 (ref $s) (struct.new_default $s))
+			(global $a1 (ref $a) (array.new $a (i32.const 5) (i32.const 3)))
+			(global $a2 (ref $a) (array.new_fixed $a 3 (i32.const 8) (i32.const 9) (i32.const 10)))
+
+			(func (export "struct_new") (result i32)
+				global.get $s1
+				struct.get $s 1)
+			(func (export "struct_default") (result i32)
+				global.get $s2
+				struct.get $s 0)
+			(func (export "array_new") (result i32)
+				global.get $a1
+				i32.const 2
+				array.get $a)
+			(func (export "array_fixed") (result i32)
+				global.get $a2
+				i32.const 1
+				array.get $a))
+	`), nil)
+	if err != nil {
+		t.Fatalf("Instantiate failed: %v", err)
+	}
+
+	expectI32Result(t, inst, "struct_new", 11)
+	expectI32Result(t, inst, "struct_default", 0)
+	expectI32Result(t, inst, "array_new", 5)
+	expectI32Result(t, inst, "array_fixed", 9)
+}

@@ -1294,6 +1294,10 @@ func (e *executor) run() ([]Value, error) {
 				return nil, e.instructionError(err)
 			}
 			e.push(v)
+		case wasmir.InstrStructSet:
+			if err := e.structSet(ins.index, uint32(ins.bits)); err != nil {
+				return nil, e.instructionError(err)
+			}
 		case wasmir.InstrArrayNew:
 			v, err := e.newArray(ins.index)
 			if err != nil {
@@ -1302,6 +1306,12 @@ func (e *executor) run() ([]Value, error) {
 			e.push(v)
 		case wasmir.InstrArrayNewDefault:
 			v, err := e.newDefaultArray(ins.index)
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			e.push(v)
+		case wasmir.InstrArrayNewFixed:
+			v, err := e.newFixedArray(ins.index, uint32(ins.bits))
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
@@ -1318,6 +1328,10 @@ func (e *executor) run() ([]Value, error) {
 				return nil, e.instructionError(err)
 			}
 			e.push(v)
+		case wasmir.InstrArraySet:
+			if err := e.arraySet(ins.index); err != nil {
+				return nil, e.instructionError(err)
+			}
 		case wasmir.InstrExternConvertAny:
 			v, err := e.pop()
 			if err != nil {
@@ -2232,7 +2246,7 @@ func (e *executor) structGet(kind wasmir.InstrKind, typeIndex uint32, fieldIndex
 		return Value{}, err
 	}
 	if !ref.Type.IsRef() || ref.Ref.Kind == RefKindNull {
-		return Value{}, fmt.Errorf("null struct reference")
+		return Value{}, fmt.Errorf("null structure reference")
 	}
 	if ref.Ref.Kind != RefKindStruct {
 		return Value{}, fmt.Errorf("expected struct reference")
@@ -2246,6 +2260,48 @@ func (e *executor) structGet(kind wasmir.InstrKind, typeIndex uint32, fieldIndex
 	}
 	value := obj.fields[fieldIndex]
 	return extendPackedField(kind, td.Fields[fieldIndex], value)
+}
+
+// structSet writes one mutable struct field, normalizing packed values before
+// they are stored.
+func (e *executor) structSet(typeIndex uint32, fieldIndex uint32) error {
+	if e.inst == nil {
+		return fmt.Errorf("instance is nil")
+	}
+	td, err := e.typeDef(typeIndex, wasmir.TypeDefKindStruct)
+	if err != nil {
+		return err
+	}
+	if int(fieldIndex) >= len(td.Fields) {
+		return fmt.Errorf("field index %d out of range", fieldIndex)
+	}
+	field := td.Fields[fieldIndex]
+	if !field.Mutable {
+		return fmt.Errorf("field %d is immutable", fieldIndex)
+	}
+	value, err := e.popWant(fieldValueType(field))
+	if err != nil {
+		return err
+	}
+	ref, err := e.pop()
+	if err != nil {
+		return err
+	}
+	if !ref.Type.IsRef() || ref.Ref.Kind == RefKindNull {
+		return fmt.Errorf("null structure reference")
+	}
+	if ref.Ref.Kind != RefKindStruct {
+		return fmt.Errorf("expected struct reference")
+	}
+	obj, err := e.inst.objectFromRef(ref.Ref)
+	if err != nil {
+		return err
+	}
+	if obj.kind != gcObjectStruct || !isRuntimeTypeIndexSubtype(e.inst.m, obj.typeIndex, typeIndex) {
+		return fmt.Errorf("struct type mismatch")
+	}
+	obj.fields[fieldIndex] = normalizeFieldValue(field, value)
+	return e.inst.replaceObjectFromRef(ref.Ref, obj)
 }
 
 // newArray pops an array element and length and allocates an array object.
@@ -2270,6 +2326,34 @@ func (e *executor) newArray(typeIndex uint32) (Value, error) {
 		return Value{}, err
 	}
 	return e.inst.newArrayRef(typeIndex, elems)
+}
+
+// newFixedArray pops count array elements and allocates an array object with
+// those elements in evaluation order.
+func (e *executor) newFixedArray(typeIndex uint32, count uint32) (Value, error) {
+	if e.inst == nil {
+		return Value{}, fmt.Errorf("instance is nil")
+	}
+	td, err := e.typeDef(typeIndex, wasmir.TypeDefKindArray)
+	if err != nil {
+		return Value{}, err
+	}
+	if uint64(count) > uint64(int(^uint(0)>>1)) {
+		return Value{}, fmt.Errorf("array length %d is too large", count)
+	}
+	elemTypes := make([]wasmir.ValueType, int(count))
+	for i := range elemTypes {
+		elemTypes[i] = fieldValueType(td.ElemField)
+	}
+	elems, err := e.popArgs(elemTypes)
+	if err != nil {
+		return Value{}, err
+	}
+	fields := make([]wasmir.FieldType, len(elems))
+	for i := range fields {
+		fields[i] = td.ElemField
+	}
+	return e.inst.newArrayRef(typeIndex, normalizeFieldValues(fields, elems))
 }
 
 // newDefaultArray pops a length and allocates an array with default elements.
@@ -2352,6 +2436,51 @@ func (e *executor) arrayGet(kind wasmir.InstrKind, typeIndex uint32) (Value, err
 		return Value{}, fmt.Errorf("array index out of bounds")
 	}
 	return extendPackedField(kind, td.ElemField, obj.elems[uint32(index)])
+}
+
+// arraySet writes one mutable array element, normalizing packed values before
+// they are stored.
+func (e *executor) arraySet(typeIndex uint32) error {
+	if e.inst == nil {
+		return fmt.Errorf("instance is nil")
+	}
+	td, err := e.typeDef(typeIndex, wasmir.TypeDefKindArray)
+	if err != nil {
+		return err
+	}
+	if !td.ElemField.Mutable {
+		return fmt.Errorf("array element is immutable")
+	}
+	value, err := e.popWant(fieldValueType(td.ElemField))
+	if err != nil {
+		return err
+	}
+	index, err := e.popI32()
+	if err != nil {
+		return err
+	}
+	ref, err := e.pop()
+	if err != nil {
+		return err
+	}
+	if !ref.Type.IsRef() || ref.Ref.Kind == RefKindNull {
+		return fmt.Errorf("null array reference")
+	}
+	if ref.Ref.Kind != RefKindArray {
+		return fmt.Errorf("expected array reference")
+	}
+	obj, err := e.inst.objectFromRef(ref.Ref)
+	if err != nil {
+		return err
+	}
+	if obj.kind != gcObjectArray || !isRuntimeTypeIndexSubtype(e.inst.m, obj.typeIndex, typeIndex) {
+		return fmt.Errorf("array type mismatch")
+	}
+	if uint32(index) >= uint32(len(obj.elems)) {
+		return fmt.Errorf("array index out of bounds")
+	}
+	obj.elems[uint32(index)] = normalizeFieldValue(td.ElemField, value)
+	return e.inst.replaceObjectFromRef(ref.Ref, obj)
 }
 
 // typeDef returns a module type definition with kind checking.

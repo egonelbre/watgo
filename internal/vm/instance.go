@@ -867,6 +867,36 @@ func (inst *Instance) evalConstExpr(init []wasmir.Instruction, constExpr bool) (
 				return Value{}, fmt.Errorf("initializer instruction %d: %w", pc, err)
 			}
 			stack = append(stack, Value{Type: wasmir.RefTypeI31(false), Ref: Reference{Kind: RefKindI31, I31: v & 0x7fffffff}})
+		case wasmir.InstrStructNew:
+			v, err := inst.evalConstStructNew(&stack, ins.TypeIndex)
+			if err != nil {
+				return Value{}, fmt.Errorf("initializer instruction %d: %w", pc, err)
+			}
+			stack = append(stack, v)
+		case wasmir.InstrStructNewDefault:
+			v, err := inst.evalConstStructNewDefault(ins.TypeIndex)
+			if err != nil {
+				return Value{}, fmt.Errorf("initializer instruction %d: %w", pc, err)
+			}
+			stack = append(stack, v)
+		case wasmir.InstrArrayNew:
+			v, err := inst.evalConstArrayNew(&stack, ins.TypeIndex)
+			if err != nil {
+				return Value{}, fmt.Errorf("initializer instruction %d: %w", pc, err)
+			}
+			stack = append(stack, v)
+		case wasmir.InstrArrayNewDefault:
+			v, err := inst.evalConstArrayNewDefault(&stack, ins.TypeIndex)
+			if err != nil {
+				return Value{}, fmt.Errorf("initializer instruction %d: %w", pc, err)
+			}
+			stack = append(stack, v)
+		case wasmir.InstrArrayNewFixed:
+			v, err := inst.evalConstArrayNewFixed(&stack, ins.TypeIndex, ins.FixedCount)
+			if err != nil {
+				return Value{}, fmt.Errorf("initializer instruction %d: %w", pc, err)
+			}
+			stack = append(stack, v)
 		case wasmir.InstrGlobalGet:
 			if inst == nil {
 				return Value{}, fmt.Errorf("initializer instruction %d: instance is nil", pc)
@@ -972,6 +1002,140 @@ func (inst *Instance) objectFromRef(ref Reference) (gcObject, error) {
 	return obj, nil
 }
 
+// replaceObjectFromRef writes an updated heap object back to the instance that
+// owns ref.
+func (inst *Instance) replaceObjectFromRef(ref Reference, obj gcObject) error {
+	owner := ref.objectInst
+	if owner == nil {
+		owner = inst
+	}
+	if owner == nil {
+		return fmt.Errorf("instance is nil")
+	}
+	if _, ok := owner.objects[ref.objectID]; !ok {
+		return fmt.Errorf("object reference %d not found", ref.objectID)
+	}
+	owner.objects[ref.objectID] = obj
+	return nil
+}
+
+// evalConstStructNew pops struct field values from a const-expression stack
+// and allocates the corresponding struct object.
+func (inst *Instance) evalConstStructNew(stack *[]Value, typeIndex uint32) (Value, error) {
+	td, err := inst.constTypeDef(typeIndex, wasmir.TypeDefKindStruct)
+	if err != nil {
+		return Value{}, err
+	}
+	fieldTypes := make([]wasmir.ValueType, len(td.Fields))
+	for i, field := range td.Fields {
+		fieldTypes[i] = fieldValueType(field)
+	}
+	values, err := popConstArgs(stack, fieldTypes)
+	if err != nil {
+		return Value{}, err
+	}
+	return inst.newStructRef(typeIndex, normalizeFieldValues(td.Fields, values))
+}
+
+// evalConstStructNewDefault allocates a struct object whose fields all hold
+// their default values.
+func (inst *Instance) evalConstStructNewDefault(typeIndex uint32) (Value, error) {
+	td, err := inst.constTypeDef(typeIndex, wasmir.TypeDefKindStruct)
+	if err != nil {
+		return Value{}, err
+	}
+	values := make([]Value, len(td.Fields))
+	for i, field := range td.Fields {
+		value, err := defaultFieldValue(field)
+		if err != nil {
+			return Value{}, err
+		}
+		values[i] = value
+	}
+	return inst.newStructRef(typeIndex, values)
+}
+
+// evalConstArrayNew pops an element value and length from a const-expression
+// stack and allocates an array object filled with that element.
+func (inst *Instance) evalConstArrayNew(stack *[]Value, typeIndex uint32) (Value, error) {
+	td, err := inst.constTypeDef(typeIndex, wasmir.TypeDefKindArray)
+	if err != nil {
+		return Value{}, err
+	}
+	length, err := popConstI32(stack)
+	if err != nil {
+		return Value{}, err
+	}
+	elem, err := popConstValue(stack, fieldValueType(td.ElemField))
+	if err != nil {
+		return Value{}, err
+	}
+	elems, err := repeatedFieldValues(td.ElemField, elem, uint32(length))
+	if err != nil {
+		return Value{}, err
+	}
+	return inst.newArrayRef(typeIndex, elems)
+}
+
+// evalConstArrayNewDefault pops a length from a const-expression stack and
+// allocates an array object filled with default element values.
+func (inst *Instance) evalConstArrayNewDefault(stack *[]Value, typeIndex uint32) (Value, error) {
+	td, err := inst.constTypeDef(typeIndex, wasmir.TypeDefKindArray)
+	if err != nil {
+		return Value{}, err
+	}
+	length, err := popConstI32(stack)
+	if err != nil {
+		return Value{}, err
+	}
+	elem, err := defaultFieldValue(td.ElemField)
+	if err != nil {
+		return Value{}, err
+	}
+	elems, err := repeatedFieldValues(td.ElemField, elem, uint32(length))
+	if err != nil {
+		return Value{}, err
+	}
+	return inst.newArrayRef(typeIndex, elems)
+}
+
+// evalConstArrayNewFixed pops count element values from a const-expression
+// stack and allocates an array object containing those values.
+func (inst *Instance) evalConstArrayNewFixed(stack *[]Value, typeIndex uint32, count uint32) (Value, error) {
+	td, err := inst.constTypeDef(typeIndex, wasmir.TypeDefKindArray)
+	if err != nil {
+		return Value{}, err
+	}
+	if uint64(count) > uint64(int(^uint(0)>>1)) {
+		return Value{}, fmt.Errorf("array length %d is too large", count)
+	}
+	elemTypes := make([]wasmir.ValueType, int(count))
+	for i := range elemTypes {
+		elemTypes[i] = fieldValueType(td.ElemField)
+	}
+	elems, err := popConstArgs(stack, elemTypes)
+	if err != nil {
+		return Value{}, err
+	}
+	fields := make([]wasmir.FieldType, len(elems))
+	for i := range fields {
+		fields[i] = td.ElemField
+	}
+	return inst.newArrayRef(typeIndex, normalizeFieldValues(fields, elems))
+}
+
+// constTypeDef returns a type definition for const-expression GC allocation.
+func (inst *Instance) constTypeDef(typeIndex uint32, kind wasmir.TypeDefKind) (wasmir.TypeDef, error) {
+	if inst == nil || int(typeIndex) >= len(inst.m.Types) {
+		return wasmir.TypeDef{}, fmt.Errorf("type index %d out of range", typeIndex)
+	}
+	td := inst.m.Types[typeIndex]
+	if td.Kind != kind {
+		return wasmir.TypeDef{}, fmt.Errorf("type index %d has kind %d, want %d", typeIndex, td.Kind, kind)
+	}
+	return td, nil
+}
+
 // evalI32ConstBinOp pops two i32 const-expression operands and pushes the i32
 // result of op.
 func evalI32ConstBinOp(stack *[]Value, op func(int32, int32) int32) error {
@@ -1000,6 +1164,21 @@ func evalI64ConstBinOp(stack *[]Value, op func(int64, int64) int64) error {
 	}
 	*stack = append(*stack, Value{Type: wasmir.ValueTypeI64, I64: op(lhs.I64, rhs.I64)})
 	return nil
+}
+
+// popConstArgs removes values from a const-expression stack and returns them
+// in evaluation order.
+func popConstArgs(stack *[]Value, params []wasmir.ValueType) ([]Value, error) {
+	if len(*stack) < len(params) {
+		return nil, fmt.Errorf("initializer stack underflow")
+	}
+	base := len(*stack) - len(params)
+	args := (*stack)[base:]
+	*stack = (*stack)[:base]
+	if err := checkArgs(params, args); err != nil {
+		return nil, err
+	}
+	return args, nil
 }
 
 // popConstValue pops the top const-expression stack value and verifies its
