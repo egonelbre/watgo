@@ -36,10 +36,8 @@ type Instance struct {
 	tables   []*Table
 	data     []dataInst
 	elems    []elemInst
-	objects  map[uint64]gcObject
 	resolver Resolver
 	exns     map[uint64]wasmException
-	nextObj  uint64
 	nextExn  uint64
 
 	// callDepth counts active WebAssembly calls in this instance. It is used
@@ -71,6 +69,10 @@ const (
 
 // gcObject is one VM-owned GC heap allocation.
 type gcObject struct {
+	// inst is the module instance that allocated this object. The typeIndex
+	// below is interpreted in this instance's type space.
+	inst *Instance
+
 	kind      gcObjectKind
 	typeIndex uint32
 	fields    []Value
@@ -266,7 +268,6 @@ func Instantiate(m *wasmir.Module, resolver Resolver) (*Instance, error) {
 	inst := &Instance{
 		m:        m,
 		resolver: resolver,
-		objects:  map[uint64]gcObject{},
 		exns:     map[uint64]wasmException{},
 	}
 	if err := inst.buildMemories(); err != nil {
@@ -950,16 +951,15 @@ func (inst *Instance) newStructRef(typeIndex uint32, fields []Value) (Value, err
 	if int(typeIndex) >= len(inst.m.Types) || inst.m.Types[typeIndex].Kind != wasmir.TypeDefKindStruct {
 		return Value{}, fmt.Errorf("type index %d is not a struct type", typeIndex)
 	}
-	inst.nextObj++
-	id := inst.nextObj
-	inst.objects[id] = gcObject{
+	obj := &gcObject{
+		inst:      inst,
 		kind:      gcObjectStruct,
 		typeIndex: typeIndex,
 		fields:    slices.Clone(fields),
 	}
 	return Value{
 		Type: wasmir.RefTypeIndexed(typeIndex, false),
-		Ref:  Reference{Kind: RefKindStruct, objectID: id, objectInst: inst},
+		Ref:  Reference{Kind: RefKindStruct, obj: obj},
 	}, nil
 }
 
@@ -972,51 +972,24 @@ func (inst *Instance) newArrayRef(typeIndex uint32, elems []Value) (Value, error
 	if int(typeIndex) >= len(inst.m.Types) || inst.m.Types[typeIndex].Kind != wasmir.TypeDefKindArray {
 		return Value{}, fmt.Errorf("type index %d is not an array type", typeIndex)
 	}
-	inst.nextObj++
-	id := inst.nextObj
-	inst.objects[id] = gcObject{
+	obj := &gcObject{
+		inst:      inst,
 		kind:      gcObjectArray,
 		typeIndex: typeIndex,
 		elems:     slices.Clone(elems),
 	}
 	return Value{
 		Type: wasmir.RefTypeIndexed(typeIndex, false),
-		Ref:  Reference{Kind: RefKindArray, objectID: id, objectInst: inst},
+		Ref:  Reference{Kind: RefKindArray, obj: obj},
 	}, nil
 }
 
-// objectFromRef resolves a struct or array reference to the heap object it
-// names.
-func (inst *Instance) objectFromRef(ref Reference) (gcObject, error) {
-	owner := ref.objectInst
-	if owner == nil {
-		owner = inst
+// objectFromRef resolves a struct or array reference to its Go heap object.
+func (inst *Instance) objectFromRef(ref Reference) (*gcObject, error) {
+	if ref.obj == nil {
+		return nil, fmt.Errorf("object reference is nil")
 	}
-	if owner == nil {
-		return gcObject{}, fmt.Errorf("instance is nil")
-	}
-	obj, ok := owner.objects[ref.objectID]
-	if !ok {
-		return gcObject{}, fmt.Errorf("object reference %d not found", ref.objectID)
-	}
-	return obj, nil
-}
-
-// replaceObjectFromRef writes an updated heap object back to the instance that
-// owns ref.
-func (inst *Instance) replaceObjectFromRef(ref Reference, obj gcObject) error {
-	owner := ref.objectInst
-	if owner == nil {
-		owner = inst
-	}
-	if owner == nil {
-		return fmt.Errorf("instance is nil")
-	}
-	if _, ok := owner.objects[ref.objectID]; !ok {
-		return fmt.Errorf("object reference %d not found", ref.objectID)
-	}
-	owner.objects[ref.objectID] = obj
-	return nil
+	return ref.obj, nil
 }
 
 // evalConstStructNew pops struct field values from a const-expression stack

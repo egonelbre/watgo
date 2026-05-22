@@ -162,12 +162,10 @@ type Reference struct {
 	// I31 is set when Kind is RefKindI31. Only the low 31 bits are used.
 	I31 int32
 
-	// objectID is set when Kind is RefKindStruct or RefKindArray. objectInst
-	// records the instance that owns the object, so shared tables can carry GC
-	// references across modules without exposing heap identities through
-	// wasmvm.Reference.
-	objectID   uint64
-	objectInst *Instance
+	// obj is set when Kind is RefKindStruct or RefKindArray. It points at the
+	// Go heap allocation for the Wasm GC object, so regular Go reachability
+	// keeps host-visible GC references alive.
+	obj *gcObject
 }
 
 // Resolver is the VM's narrow bridge to host-owned imports.
@@ -2130,13 +2128,7 @@ func (e *executor) refMatchesTypeIndex(ref Reference, targetType uint32) bool {
 		if err != nil {
 			return false
 		}
-		if target.Kind == wasmir.TypeDefKindStruct && ref.Kind != RefKindStruct {
-			return false
-		}
-		if target.Kind == wasmir.TypeDefKindArray && ref.Kind != RefKindArray {
-			return false
-		}
-		return isRuntimeTypeIndexSubtype(e.inst.m, obj.typeIndex, targetType)
+		return e.objectMatchesType(obj, target.Kind, targetType)
 	default:
 		return false
 	}
@@ -2255,7 +2247,7 @@ func (e *executor) structGet(kind wasmir.InstrKind, typeIndex uint32, fieldIndex
 	if err != nil {
 		return Value{}, err
 	}
-	if obj.kind != gcObjectStruct || !isRuntimeTypeIndexSubtype(e.inst.m, obj.typeIndex, typeIndex) {
+	if !e.objectMatchesType(obj, wasmir.TypeDefKindStruct, typeIndex) {
 		return Value{}, fmt.Errorf("struct type mismatch")
 	}
 	value := obj.fields[fieldIndex]
@@ -2297,11 +2289,11 @@ func (e *executor) structSet(typeIndex uint32, fieldIndex uint32) error {
 	if err != nil {
 		return err
 	}
-	if obj.kind != gcObjectStruct || !isRuntimeTypeIndexSubtype(e.inst.m, obj.typeIndex, typeIndex) {
+	if !e.objectMatchesType(obj, wasmir.TypeDefKindStruct, typeIndex) {
 		return fmt.Errorf("struct type mismatch")
 	}
 	obj.fields[fieldIndex] = normalizeFieldValue(field, value)
-	return e.inst.replaceObjectFromRef(ref.Ref, obj)
+	return nil
 }
 
 // newArray pops an array element and length and allocates an array object.
@@ -2429,7 +2421,7 @@ func (e *executor) arrayGet(kind wasmir.InstrKind, typeIndex uint32) (Value, err
 	if err != nil {
 		return Value{}, err
 	}
-	if obj.kind != gcObjectArray || !isRuntimeTypeIndexSubtype(e.inst.m, obj.typeIndex, typeIndex) {
+	if !e.objectMatchesType(obj, wasmir.TypeDefKindArray, typeIndex) {
 		return Value{}, fmt.Errorf("array type mismatch")
 	}
 	if uint32(index) >= uint32(len(obj.elems)) {
@@ -2473,14 +2465,14 @@ func (e *executor) arraySet(typeIndex uint32) error {
 	if err != nil {
 		return err
 	}
-	if obj.kind != gcObjectArray || !isRuntimeTypeIndexSubtype(e.inst.m, obj.typeIndex, typeIndex) {
+	if !e.objectMatchesType(obj, wasmir.TypeDefKindArray, typeIndex) {
 		return fmt.Errorf("array type mismatch")
 	}
 	if uint32(index) >= uint32(len(obj.elems)) {
 		return fmt.Errorf("array index out of bounds")
 	}
 	obj.elems[uint32(index)] = normalizeFieldValue(td.ElemField, value)
-	return e.inst.replaceObjectFromRef(ref.Ref, obj)
+	return nil
 }
 
 // typeDef returns a module type definition with kind checking.
@@ -2493,6 +2485,37 @@ func (e *executor) typeDef(typeIndex uint32, kind wasmir.TypeDefKind) (wasmir.Ty
 		return wasmir.TypeDef{}, fmt.Errorf("type index %d has kind %d, want %d", typeIndex, td.Kind, kind)
 	}
 	return td, nil
+}
+
+// objectMatchesType reports whether obj has the requested aggregate kind and
+// can be used where targetType is expected in this executor's instance.
+func (e *executor) objectMatchesType(obj *gcObject, kind wasmir.TypeDefKind, targetType uint32) bool {
+	if e.inst == nil || obj == nil || obj.kind.typeDefKind() != kind {
+		return false
+	}
+	if int(targetType) >= len(e.inst.m.Types) || e.inst.m.Types[targetType].Kind != kind {
+		return false
+	}
+	owner := obj.inst
+	if owner == nil {
+		owner = e.inst
+	}
+	if owner == e.inst {
+		return isRuntimeTypeIndexSubtype(e.inst.m, obj.typeIndex, targetType)
+	}
+	return typeequiv.Types(owner.m, obj.typeIndex, e.inst.m, targetType)
+}
+
+// typeDefKind returns the wasmir type definition kind represented by kind.
+func (kind gcObjectKind) typeDefKind() wasmir.TypeDefKind {
+	switch kind {
+	case gcObjectStruct:
+		return wasmir.TypeDefKindStruct
+	case gcObjectArray:
+		return wasmir.TypeDefKindArray
+	default:
+		return 0
+	}
 }
 
 // fieldValueType returns the stack value type for a struct or array field.
@@ -2588,7 +2611,7 @@ func refsEqual(a Reference, b Reference) bool {
 	case RefKindI31:
 		return a.I31 == b.I31
 	case RefKindStruct, RefKindArray:
-		return a.objectID == b.objectID && a.objectInst == b.objectInst
+		return a.obj == b.obj
 	default:
 		return false
 	}
