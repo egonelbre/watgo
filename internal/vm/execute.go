@@ -55,6 +55,24 @@ type instructionError struct {
 	err  error
 }
 
+// wasmException is the runtime payload propagated by throw and throw_ref.
+type wasmException struct {
+	tagID   uint64
+	payload []Value
+}
+
+// wasmExceptionError is the control-flow error used to propagate uncaught wasm
+// exceptions across Go call frames.
+type wasmExceptionError struct {
+	exn wasmException
+}
+
+// Error reports a stable marker used by harnesses to distinguish wasm
+// exceptions from ordinary traps.
+func (e wasmExceptionError) Error() string {
+	return "wasm exception"
+}
+
 // Error returns the execution error annotated with program counter and opcode.
 func (e instructionError) Error() string {
 	return fmt.Sprintf("pc %d %s: %v", e.pc, instrName(e.kind), e.err)
@@ -108,6 +126,9 @@ const (
 
 	// RefKindExtern is an opaque externref value supplied by the host.
 	RefKindExtern
+
+	// RefKindExn is a reference to a WebAssembly exception object.
+	RefKindExn
 )
 
 // Reference is one runtime reference value.
@@ -124,6 +145,10 @@ type Reference struct {
 	// ExternID is set when Kind is RefKindExtern. The VM treats this as an
 	// opaque identity token and never interprets it.
 	ExternID uint64
+
+	// ExnID is set when Kind is RefKindExn. It indexes the owning instance's
+	// exception-reference table.
+	ExnID uint64
 }
 
 // Resolver is the VM's narrow bridge to host-owned imports.
@@ -140,6 +165,9 @@ type Resolver interface {
 
 	// Global resolves an imported global in the module's global index space.
 	Global(index uint32, def wasmir.Global) (*Global, error)
+
+	// Tag resolves an imported tag in the module's tag index space.
+	Tag(index uint32, ft wasmir.TypeDef) (*Tag, error)
 }
 
 // checkArgs verifies call argument count and value types.
@@ -236,6 +264,9 @@ type runtimeLabel struct {
 	// isLoop reports whether branches to this label jump to the loop body
 	// rather than exiting the label.
 	isLoop bool
+
+	// catches contains compiled catch clauses when this label is a try_table.
+	catches []catchTarget
 }
 
 // executeFunction interprets one compiled module-defined function body.
@@ -300,7 +331,7 @@ func (e *executor) run() ([]Value, error) {
 	for e.pc = 0; e.pc < len(e.fn.code); e.pc++ {
 		ins := e.fn.code[e.pc]
 		switch ins.kind {
-		case wasmir.InstrBlock, wasmir.InstrLoop:
+		case wasmir.InstrBlock, wasmir.InstrLoop, wasmir.InstrTryTable:
 			if err := e.enterLabel(e.pc); err != nil {
 				return nil, e.instructionError(err)
 			}
@@ -1197,21 +1228,58 @@ func (e *executor) run() ([]Value, error) {
 		case wasmir.InstrCall:
 			results, err := e.callFunction(ins.index)
 			if err != nil {
+				if handled, handleErr := e.handleExceptionError(err); handleErr != nil {
+					return nil, e.instructionError(handleErr)
+				} else if handled {
+					continue
+				}
 				return nil, e.callInstructionError(err)
 			}
 			e.stack = append(e.stack, results...)
 		case wasmir.InstrCallIndirect:
 			results, err := e.callIndirectFunction(ins.index, uint32(ins.bits))
 			if err != nil {
+				if handled, handleErr := e.handleExceptionError(err); handleErr != nil {
+					return nil, e.instructionError(handleErr)
+				} else if handled {
+					continue
+				}
 				return nil, e.callInstructionError(err)
 			}
 			e.stack = append(e.stack, results...)
 		case wasmir.InstrCallRef:
 			results, err := e.callRefFunction(ins.index)
 			if err != nil {
+				if handled, handleErr := e.handleExceptionError(err); handleErr != nil {
+					return nil, e.instructionError(handleErr)
+				} else if handled {
+					continue
+				}
 				return nil, e.callInstructionError(err)
 			}
 			e.stack = append(e.stack, results...)
+		case wasmir.InstrThrow:
+			exn, err := e.makeException(ins.index)
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			if handled, err := e.handleException(exn); err != nil {
+				return nil, e.instructionError(err)
+			} else if handled {
+				continue
+			}
+			return nil, e.instructionError(wasmExceptionError{exn: exn})
+		case wasmir.InstrThrowRef:
+			exn, err := e.popExceptionRef()
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			if handled, err := e.handleException(exn); err != nil {
+				return nil, e.instructionError(err)
+			} else if handled {
+				continue
+			}
+			return nil, e.instructionError(wasmExceptionError{exn: exn})
 		case wasmir.InstrReturnCall:
 			tail, results, err := e.tailCallFunction(ins.index)
 			if err != nil {
@@ -1391,6 +1459,7 @@ func (e *executor) enterLabel(pc int) error {
 		resultArity: label.resultArity,
 		branchArity: label.branchArity,
 		isLoop:      label.isLoop,
+		catches:     label.catches,
 	})
 	return nil
 }
@@ -1414,6 +1483,14 @@ func (e *executor) branchTo(depth uint32, targetPC int) error {
 		return fmt.Errorf("branch depth %d out of range", depth)
 	}
 	targetIndex := len(e.labels) - 1 - int(depth)
+	return e.branchToLabelIndex(targetIndex, targetPC)
+}
+
+// branchToLabelIndex applies branch effects to a target label index.
+func (e *executor) branchToLabelIndex(targetIndex int, targetPC int) error {
+	if targetIndex < 0 || targetIndex >= len(e.labels) {
+		return fmt.Errorf("branch target label %d out of range", targetIndex)
+	}
 	target := e.labels[targetIndex]
 	if err := e.normalizeLabelValues(target.height, target.branchArity); err != nil {
 		return err
@@ -1427,6 +1504,102 @@ func (e *executor) branchTo(depth uint32, targetPC int) error {
 	}
 	e.pc = targetPC
 	return nil
+}
+
+// makeException pops a tag payload and builds the exception object for throw.
+func (e *executor) makeException(tagIndex uint32) (wasmException, error) {
+	if e.inst == nil {
+		return wasmException{}, fmt.Errorf("instance is nil")
+	}
+	if int(tagIndex) >= len(e.inst.tags) {
+		return wasmException{}, fmt.Errorf("tag index %d out of range", tagIndex)
+	}
+	tag := e.inst.tags[tagIndex]
+	payload, err := e.popArgs(tag.params)
+	if err != nil {
+		return wasmException{}, err
+	}
+	return wasmException{tagID: tag.id, payload: payload}, nil
+}
+
+// popExceptionRef pops an exnref and resolves it to the stored exception.
+func (e *executor) popExceptionRef() (wasmException, error) {
+	if e.inst == nil {
+		return wasmException{}, fmt.Errorf("instance is nil")
+	}
+	v, err := e.pop()
+	if err != nil {
+		return wasmException{}, err
+	}
+	if !v.Type.IsRef() || v.Ref.Kind == RefKindNull {
+		return wasmException{}, fmt.Errorf("throw_ref got null exception reference")
+	}
+	return e.inst.exceptionFromRef(v.Ref)
+}
+
+// handleExceptionError catches err when it wraps a wasm exception.
+func (e *executor) handleExceptionError(err error) (bool, error) {
+	var exnErr wasmExceptionError
+	if !errors.As(err, &exnErr) {
+		return false, nil
+	}
+	return e.handleException(exnErr.exn)
+}
+
+// handleException applies the nearest matching active try_table catch.
+func (e *executor) handleException(exn wasmException) (bool, error) {
+	for handlerIndex := len(e.labels) - 1; handlerIndex >= 0; handlerIndex-- {
+		handler := e.labels[handlerIndex]
+		if len(handler.catches) == 0 {
+			continue
+		}
+		for _, catch := range handler.catches {
+			values, ok, err := e.exceptionCatchValues(catch, exn)
+			if err != nil {
+				return false, err
+			}
+			if !ok {
+				continue
+			}
+			targetIndex := handlerIndex - 1 - int(catch.target.depth)
+			if targetIndex < 0 {
+				return false, fmt.Errorf("catch target depth %d out of range", catch.target.depth)
+			}
+			e.stack = append(e.stack, values...)
+			if err := e.branchToLabelIndex(targetIndex, catch.target.pc); err != nil {
+				return false, err
+			}
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// exceptionCatchValues returns the branch values supplied by catch for exn.
+func (e *executor) exceptionCatchValues(catch catchTarget, exn wasmException) ([]Value, bool, error) {
+	switch catch.kind {
+	case wasmir.TryTableCatchKindTag, wasmir.TryTableCatchKindTagRef:
+		if e.inst == nil || int(catch.tagIndex) >= len(e.inst.tags) {
+			return nil, false, fmt.Errorf("tag index %d out of range", catch.tagIndex)
+		}
+		if e.inst.tags[catch.tagIndex].id != exn.tagID {
+			return nil, false, nil
+		}
+		values := append([]Value(nil), exn.payload...)
+		if catch.kind == wasmir.TryTableCatchKindTagRef {
+			values = append(values, e.inst.newExceptionRef(exn))
+		}
+		return values, true, nil
+	case wasmir.TryTableCatchKindAll:
+		return nil, true, nil
+	case wasmir.TryTableCatchKindAllRef:
+		if e.inst == nil {
+			return nil, false, fmt.Errorf("instance is nil")
+		}
+		return []Value{e.inst.newExceptionRef(exn)}, true, nil
+	default:
+		return nil, false, fmt.Errorf("unsupported catch kind %d", catch.kind)
+	}
 }
 
 // normalizeLabelValues moves the top arity values to height, discarding

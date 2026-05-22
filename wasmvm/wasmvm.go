@@ -39,6 +39,9 @@ const (
 
 	// RefKindExtern is an opaque externref value supplied by the host.
 	RefKindExtern = vm.RefKindExtern
+
+	// RefKindExn is a reference to a WebAssembly exception object.
+	RefKindExn = vm.RefKindExn
 )
 
 // I32 returns a runtime Value whose type is wasmir.ValueTypeI32 and whose
@@ -84,8 +87,8 @@ type Imports map[string]map[string]Extern
 
 // Extern is a runtime object supplied for a module import.
 //
-// *HostFunc, *Func, *Global, *Memory, and *Table are the currently supported
-// Extern implementations.
+// *HostFunc, *Func, *Global, *Memory, *Table, and *Tag are the currently
+// supported Extern implementations.
 type Extern interface {
 	isExtern()
 }
@@ -180,6 +183,17 @@ func (t *Table) Size() uint64 {
 	return t.table.Size()
 }
 
+// Tag is an instantiated WebAssembly exception tag exposed for imports.
+type Tag struct {
+	tag             *vm.Tag
+	sourceModule    *wasmir.Module
+	sourceTypeIndex uint32
+	sourceTypeKnown bool
+}
+
+// isExtern marks Tag pointers as valid import objects.
+func (*Tag) isExtern() {}
+
 // NewGlobal returns an instantiated WebAssembly global for use as an import.
 func NewGlobal(value Value, mutable bool) (*Global, error) {
 	global, err := vm.NewGlobal(value.Type, mutable, value)
@@ -241,6 +255,7 @@ func (rt *Runtime) Instantiate(m *wasmir.Module, imports Imports) (*ModuleInstan
 		globals:  make(map[string]*Global),
 		memories: make(map[string]*Memory),
 		tables:   make(map[string]*Table),
+		tags:     make(map[string]*Tag),
 		imports:  imports,
 	}
 	vmInst, err := vm.Instantiate(m, vmResolver{inst: inst})
@@ -274,6 +289,21 @@ func (rt *Runtime) Instantiate(m *wasmir.Module, imports Imports) (*ModuleInstan
 				return nil, fmt.Errorf("export %q: table index %d out of range", exp.Name, exp.Index)
 			}
 			inst.tables[exp.Name] = &Table{table: table}
+		case wasmir.ExternalKindTag:
+			tag, err := inst.vm.Tag(exp.Index)
+			if err != nil {
+				return nil, fmt.Errorf("export %q: tag index %d out of range", exp.Name, exp.Index)
+			}
+			typeIndex, err := tagTypeIndex(m, exp.Index)
+			if err != nil {
+				return nil, fmt.Errorf("export %q: %w", exp.Name, err)
+			}
+			inst.tags[exp.Name] = &Tag{
+				tag:             tag,
+				sourceModule:    m,
+				sourceTypeIndex: typeIndex,
+				sourceTypeKnown: true,
+			}
 		}
 	}
 	return inst, nil
@@ -293,6 +323,7 @@ type ModuleInstance struct {
 	globals  map[string]*Global
 	memories map[string]*Memory
 	tables   map[string]*Table
+	tags     map[string]*Tag
 	imports  Imports
 }
 
@@ -333,6 +364,15 @@ func (inst *ModuleInstance) ExportedMemory(name string) (*Memory, bool) {
 // import to another instantiation.
 func (inst *ModuleInstance) ExportedTable(name string) (*Table, bool) {
 	t, ok := inst.tables[name]
+	return t, ok
+}
+
+// ExportedTag returns the exported tag with the given name.
+//
+// The returned boolean is false when name is not exported as a tag. The
+// returned Tag can be supplied as an import to another instantiation.
+func (inst *ModuleInstance) ExportedTag(name string) (*Tag, bool) {
+	t, ok := inst.tags[name]
 	return t, ok
 }
 
@@ -470,6 +510,27 @@ func resolveGlobalImport(imports Imports, def wasmir.Global) (*Global, error) {
 	}
 }
 
+// resolveTagImport finds the host tag supplied for a tag import.
+func resolveTagImport(imports Imports, imp wasmir.Import) (*Tag, error) {
+	fields, ok := imports[imp.Module]
+	if !ok {
+		return nil, fmt.Errorf("missing import module %q", imp.Module)
+	}
+	ext, ok := fields[imp.Name]
+	if !ok {
+		return nil, fmt.Errorf("missing import %q.%q", imp.Module, imp.Name)
+	}
+	switch tag := ext.(type) {
+	case *Tag:
+		if tag == nil {
+			return nil, fmt.Errorf("import %q.%q is nil", imp.Module, imp.Name)
+		}
+		return tag, nil
+	default:
+		return nil, fmt.Errorf("import %q.%q is not a tag", imp.Module, imp.Name)
+	}
+}
+
 // resolveHostFunc finds the Go callback supplied for a function import.
 func resolveHostFunc(imports Imports, imp wasmir.Import) (HostFunc, error) {
 	fields, ok := imports[imp.Module]
@@ -538,6 +599,25 @@ func checkHostFuncType(m *wasmir.Module, imp wasmir.Import, host HostFunc) error
 	return nil
 }
 
+// tagTypeIndex resolves an absolute tag index to the module type index it uses.
+func tagTypeIndex(m *wasmir.Module, tagIndex uint32) (uint32, error) {
+	var current uint32
+	for _, imp := range m.Imports {
+		if imp.Kind != wasmir.ExternalKindTag {
+			continue
+		}
+		if current == tagIndex {
+			return imp.TypeIdx, nil
+		}
+		current++
+	}
+	defIndex := tagIndex - current
+	if int(defIndex) >= len(m.Tags) {
+		return 0, fmt.Errorf("tag index %d out of range", tagIndex)
+	}
+	return m.Tags[defIndex].TypeIdx, nil
+}
+
 type vmResolver struct {
 	inst *ModuleInstance
 }
@@ -575,4 +655,52 @@ func (r vmResolver) Global(index uint32, def wasmir.Global) (*vm.Global, error) 
 		return nil, err
 	}
 	return global.global, nil
+}
+
+// Tag resolves an imported tag for the internal VM.
+func (r vmResolver) Tag(index uint32, ft wasmir.TypeDef) (*vm.Tag, error) {
+	imp, err := tagImportAt(r.inst.module, index)
+	if err != nil {
+		return nil, err
+	}
+	tag, err := resolveTagImport(r.inst.imports, imp)
+	if err != nil {
+		return nil, err
+	}
+	if tag.sourceTypeKnown {
+		if !typeequiv.Types(tag.sourceModule, tag.sourceTypeIndex, r.inst.module, imp.TypeIdx) {
+			return nil, fmt.Errorf("import %q.%q type mismatch", imp.Module, imp.Name)
+		}
+	} else if !sameValueTypes(tag.tag.Params(), ft.Params) {
+		return nil, fmt.Errorf("import %q.%q type mismatch", imp.Module, imp.Name)
+	}
+	return tag.tag, nil
+}
+
+// tagImportAt returns the tag import at absolute imported-tag index.
+func tagImportAt(m *wasmir.Module, index uint32) (wasmir.Import, error) {
+	var current uint32
+	for _, imp := range m.Imports {
+		if imp.Kind != wasmir.ExternalKindTag {
+			continue
+		}
+		if current == index {
+			return imp, nil
+		}
+		current++
+	}
+	return wasmir.Import{}, fmt.Errorf("tag import index %d out of range", index)
+}
+
+// sameValueTypes reports whether a and b have the same runtime value types.
+func sameValueTypes(a []wasmir.ValueType, b []wasmir.ValueType) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

@@ -60,6 +60,13 @@ type function struct {
 	laneMemories []laneMemoryImmediate
 }
 
+// catchTarget is one compiled try_table catch clause.
+type catchTarget struct {
+	kind     wasmir.TryTableCatchKind
+	tagIndex uint32
+	target   branchTarget
+}
+
 // laneMemoryImmediate is the immediate payload for a SIMD lane memory
 // instruction.
 type laneMemoryImmediate struct {
@@ -130,13 +137,18 @@ func compileFunction(m *wasmir.Module, fn *wasmir.Function) (*function, error) {
 	for pc, ins := range fn.Body {
 		op := instr{kind: ins.Kind, target: -1, bits: -1}
 		switch ins.Kind {
-		case wasmir.InstrBlock, wasmir.InstrLoop:
+		case wasmir.InstrBlock, wasmir.InstrLoop, wasmir.InstrTryTable:
 			label, ok := ctrl.labels[pc]
 			if !ok {
 				return nil, fmt.Errorf("%s at %d has no matching end", instrName(ins.Kind), pc)
 			}
 			if err := setControlLabelSignature(m, ins, label, ctrl.labels, pc); err != nil {
 				return nil, err
+			}
+			if ins.Kind == wasmir.InstrTryTable {
+				if err := setControlLabelCatches(ins, label, labelStack, ctrl, finalEnd, pc); err != nil {
+					return nil, err
+				}
 			}
 			labelStack = append(labelStack, pc)
 		case wasmir.InstrIf:
@@ -172,6 +184,8 @@ func compileFunction(m *wasmir.Module, fn *wasmir.Function) (*function, error) {
 		case wasmir.InstrCallIndirect, wasmir.InstrReturnCallIndirect:
 			op.index = ins.TableIndex
 			op.bits = int64(ins.CallTypeIndex)
+		case wasmir.InstrThrow:
+			op.index = ins.TagIndex
 		case wasmir.InstrRefNull:
 			op.index = uint32(len(out.refTypes))
 			out.refTypes = append(out.refTypes, ins.RefType)
@@ -332,6 +346,7 @@ func compileFunction(m *wasmir.Module, fn *wasmir.Function) (*function, error) {
 			wasmir.InstrI32ReinterpretF32, wasmir.InstrI64ReinterpretF64,
 			wasmir.InstrF32ReinterpretI32, wasmir.InstrF64ReinterpretI64,
 			wasmir.InstrDrop, wasmir.InstrNop, wasmir.InstrUnreachable,
+			wasmir.InstrThrowRef,
 			wasmir.InstrRefIsNull, wasmir.InstrRefAsNonNull,
 			wasmir.InstrRefEq, wasmir.InstrExternConvertAny, wasmir.InstrAnyConvertExtern,
 			wasmir.InstrI8x16Splat, wasmir.InstrI16x8Splat, wasmir.InstrI32x4Splat,
@@ -459,6 +474,25 @@ func setControlLabelSignature(m *wasmir.Module, ins wasmir.Instruction, label co
 	return nil
 }
 
+// setControlLabelCatches records compiled catch targets for a try_table label.
+func setControlLabelCatches(ins wasmir.Instruction, label controlLabel, labelStack []int, ctrl controlInfo, finalEnd int, pc int) error {
+	label = ctrl.labels[pc]
+	label.catches = make([]catchTarget, 0, len(ins.TryTableCatches))
+	for i, catch := range ins.TryTableCatches {
+		target, err := compileBranchTarget(catch.LabelDepth, labelStack, ctrl, finalEnd)
+		if err != nil {
+			return fmt.Errorf("try_table at %d catch %d: %w", pc, i, err)
+		}
+		label.catches = append(label.catches, catchTarget{
+			kind:     catch.Kind,
+			tagIndex: catch.TagIndex,
+			target:   target,
+		})
+	}
+	ctrl.labels[pc] = label
+	return nil
+}
+
 // controlSignature resolves a structured-control instruction's block type.
 func controlSignature(m *wasmir.Module, ins wasmir.Instruction) ([]wasmir.ValueType, []wasmir.ValueType, error) {
 	if ins.BlockTypeUsesIndex {
@@ -509,6 +543,7 @@ type controlLabel struct {
 	resultArity  int
 	branchArity  int
 	isLoop       bool
+	catches      []catchTarget
 }
 
 // controlInfo stores precomputed control-boundary metadata by opening
@@ -532,7 +567,7 @@ func analyzeControl(body []wasmir.Instruction) (controlInfo, error) {
 
 	for pc, ins := range body {
 		switch ins.Kind {
-		case wasmir.InstrBlock, wasmir.InstrLoop, wasmir.InstrIf:
+		case wasmir.InstrBlock, wasmir.InstrLoop, wasmir.InstrIf, wasmir.InstrTryTable:
 			stack = append(stack, pc)
 		case wasmir.InstrElse:
 			if len(stack) == 0 {

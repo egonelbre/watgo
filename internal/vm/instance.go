@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"sync/atomic"
 
 	"github.com/eliben/watgo/wasmir"
 )
@@ -29,12 +30,15 @@ var errCallStackExhausted = errors.New("call stack exhausted")
 type Instance struct {
 	m        *wasmir.Module
 	funcs    []funcInst
+	tags     []*Tag
 	globals  []*Global
 	memories []*Memory
 	tables   []*Table
 	data     []dataInst
 	elems    []elemInst
 	resolver Resolver
+	exns     map[uint64]wasmException
+	nextExn  uint64
 
 	// callDepth counts active WebAssembly calls in this instance. It is used
 	// to turn runaway recursion into a regular VM error before the Go runtime
@@ -54,6 +58,24 @@ type funcInst struct {
 	// code is non-nil for module-defined functions. It is compiled once during
 	// instantiation from wasmir.Function into the VM's execution form.
 	code *function
+}
+
+// Tag is one instantiated exception tag identity.
+type Tag struct {
+	id     uint64
+	params []wasmir.ValueType
+}
+
+var nextTagID atomic.Uint64
+
+// NewTag creates a VM exception tag with a fresh runtime identity.
+func NewTag(params []wasmir.ValueType) *Tag {
+	return &Tag{id: nextTagID.Add(1), params: slices.Clone(params)}
+}
+
+// Params returns the payload value types carried by this tag.
+func (t *Tag) Params() []wasmir.ValueType {
+	return slices.Clone(t.params)
 }
 
 // Global is one instantiated global in the module's global index space.
@@ -224,11 +246,14 @@ func Instantiate(m *wasmir.Module, resolver Resolver) (*Instance, error) {
 	if m == nil {
 		return nil, fmt.Errorf("module is nil")
 	}
-	inst := &Instance{m: m, resolver: resolver}
+	inst := &Instance{m: m, resolver: resolver, exns: map[uint64]wasmException{}}
 	if err := inst.buildMemories(); err != nil {
 		return nil, err
 	}
 	inst.buildDataSegments()
+	if err := inst.buildTags(); err != nil {
+		return nil, err
+	}
 	if err := inst.buildFuncs(); err != nil {
 		return nil, err
 	}
@@ -251,6 +276,60 @@ func Instantiate(m *wasmir.Module, resolver Resolver) (*Instance, error) {
 		return nil, err
 	}
 	return inst, nil
+}
+
+// buildTags creates the instance tag address space.
+func (inst *Instance) buildTags() error {
+	for _, imp := range inst.m.Imports {
+		if imp.Kind != wasmir.ExternalKindTag {
+			continue
+		}
+		ft, err := inst.funcType(imp.TypeIdx)
+		if err != nil {
+			return fmt.Errorf("tag import %q.%q has invalid type: %w", imp.Module, imp.Name, err)
+		}
+		if len(ft.Results) != 0 {
+			return fmt.Errorf("tag import %q.%q has non-empty result type", imp.Module, imp.Name)
+		}
+		if inst.resolver == nil {
+			return fmt.Errorf("resolver is nil")
+		}
+		tag, err := inst.resolver.Tag(uint32(len(inst.tags)), ft)
+		if err != nil {
+			return fmt.Errorf("tag[%d]: %w", len(inst.tags), err)
+		}
+		if err := checkImportedTag(ft, tag); err != nil {
+			return fmt.Errorf("tag[%d]: %w", len(inst.tags), err)
+		}
+		inst.tags = append(inst.tags, tag)
+	}
+	for _, tag := range inst.m.Tags {
+		ft, err := inst.funcType(tag.TypeIdx)
+		if err != nil {
+			return fmt.Errorf("tag[%d]: %w", len(inst.tags), err)
+		}
+		if len(ft.Results) != 0 {
+			return fmt.Errorf("tag[%d]: non-empty result type", len(inst.tags))
+		}
+		inst.tags = append(inst.tags, NewTag(ft.Params))
+	}
+	return nil
+}
+
+// checkImportedTag verifies that tag satisfies the imported tag type.
+func checkImportedTag(ft wasmir.TypeDef, tag *Tag) error {
+	if tag == nil {
+		return fmt.Errorf("import resolved to nil tag")
+	}
+	if len(tag.params) != len(ft.Params) {
+		return fmt.Errorf("parameter count mismatch: got %d, want %d", len(tag.params), len(ft.Params))
+	}
+	for i := range ft.Params {
+		if !runtimeTypeMatches(tag.params[i], ft.Params[i]) {
+			return fmt.Errorf("parameter %d type mismatch: got %s, want %s", i, tag.params[i], ft.Params[i])
+		}
+	}
+	return nil
 }
 
 // executeStartFunction runs the module's optional start function after
@@ -345,6 +424,45 @@ func (inst *Instance) FuncTypeIndex(index uint32) (uint32, error) {
 		return 0, fmt.Errorf("call function index %d out of range", index)
 	}
 	return inst.funcs[index].typeIdx, nil
+}
+
+// Tag returns the instantiated tag at index.
+func (inst *Instance) Tag(index uint32) (*Tag, error) {
+	if int(index) >= len(inst.tags) {
+		return nil, fmt.Errorf("tag index %d out of range", index)
+	}
+	return inst.tags[index], nil
+}
+
+// tagType returns the function type referenced by a tag index.
+func (inst *Instance) tagType(index uint32) (wasmir.TypeDef, error) {
+	if int(index) >= len(inst.tags) {
+		return wasmir.TypeDef{}, fmt.Errorf("tag index %d out of range", index)
+	}
+	return wasmir.TypeDef{Kind: wasmir.TypeDefKindFunc, Params: inst.tags[index].params}, nil
+}
+
+// newExceptionRef stores exn and returns an exnref value for it.
+func (inst *Instance) newExceptionRef(exn wasmException) Value {
+	inst.nextExn++
+	id := inst.nextExn
+	inst.exns[id] = wasmException{
+		tagID:   exn.tagID,
+		payload: slices.Clone(exn.payload),
+	}
+	return Value{Type: wasmir.RefTypeExn(false), Ref: Reference{Kind: RefKindExn, ExnID: id}}
+}
+
+// exceptionFromRef resolves an exnref value into its stored exception.
+func (inst *Instance) exceptionFromRef(ref Reference) (wasmException, error) {
+	if ref.Kind != RefKindExn {
+		return wasmException{}, fmt.Errorf("expected exnref")
+	}
+	exn, ok := inst.exns[ref.ExnID]
+	if !ok {
+		return wasmException{}, fmt.Errorf("exception reference %d not found", ref.ExnID)
+	}
+	return wasmException{tagID: exn.tagID, payload: slices.Clone(exn.payload)}, nil
 }
 
 // callType returns the function type referenced by an indirect call type

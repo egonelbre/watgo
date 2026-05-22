@@ -26,10 +26,6 @@ var wasmSpecWasmvmScriptsFlag = flag.String(
 // wasmSpecWasmvmDeniedScripts lists spec scripts not currently run through the
 // wasmvm backend. Entries ending in "/" deny an entire directory subtree.
 var wasmSpecWasmvmDeniedScripts = []string{
-	"scripts/exceptions/throw.wast",
-	"scripts/exceptions/throw_ref.wast",
-	"scripts/exceptions/try_table.wast",
-
 	"scripts/gc/array.wast",
 	"scripts/gc/array_copy.wast",
 	"scripts/gc/array_fill.wast",
@@ -262,6 +258,8 @@ func (r *wasmSpecWasmvmRunner) runCommand(res *commandResult, cmd scriptCommand,
 		r.runAssertReturn(res, cmd)
 	case commandAssertTrap:
 		r.runAssertTrap(res, cmd)
+	case commandAssertException:
+		r.runAssertException(res, cmd)
 	case commandAssertExhaustion:
 		r.runAssertExhaustion(res, cmd)
 	case commandAssertUnlinkable:
@@ -342,6 +340,7 @@ func (r *wasmSpecWasmvmRunner) runModule(res *commandResult, cmd scriptCommand) 
 	r.bindGlobalExports(runtimeName, inst, m)
 	r.bindMemoryExports(runtimeName, inst, m)
 	r.bindTableExports(runtimeName, inst, m)
+	r.bindTagExports(runtimeName, inst, m)
 	res.status = true
 }
 
@@ -495,6 +494,24 @@ func (r *wasmSpecWasmvmRunner) bindTableExports(runtimeName string, inst *wasmvm
 	}
 }
 
+// bindTagExports exposes tag exports under runtimeName for later tag imports
+// in the same spec script.
+func (r *wasmSpecWasmvmRunner) bindTagExports(runtimeName string, inst *wasmvm.ModuleInstance, m *wasmir.Module) {
+	for _, exp := range m.Exports {
+		if exp.Kind != wasmir.ExternalKindTag {
+			continue
+		}
+		tag, ok := inst.ExportedTag(exp.Name)
+		if !ok {
+			continue
+		}
+		if r.imports[runtimeName] == nil {
+			r.imports[runtimeName] = map[string]wasmvm.Extern{}
+		}
+		r.imports[runtimeName][exp.Name] = tag
+	}
+}
+
 // copyRegisteredImports aliases importable exports when a spec register
 // command gives a module a new import module name.
 func (r *wasmSpecWasmvmRunner) copyRegisteredImports(registerName string, sourceName string) {
@@ -608,6 +625,23 @@ func (r *wasmSpecWasmvmRunner) runAssertExhaustion(res *commandResult, cmd scrip
 	if cmd.expectText != "" && !matchesExpectedFailureText(err.Error(), cmd.expectText) {
 		res.status = false
 		res.detail = fmt.Sprintf("exhaustion text mismatch: got %q want substring %q", err.Error(), cmd.expectText)
+		return
+	}
+	res.status = true
+}
+
+// runAssertException requires an invocation to fail by throwing a wasm
+// exception rather than trapping for another reason.
+func (r *wasmSpecWasmvmRunner) runAssertException(res *commandResult, cmd scriptCommand) {
+	_, err := r.invoke(cmd.action)
+	if err == nil {
+		res.status = false
+		res.detail = "expected exception, got success"
+		return
+	}
+	if !isWasmExceptionError(err) {
+		res.status = false
+		res.detail = fmt.Sprintf("expected exception, got %q", err.Error())
 		return
 	}
 	res.status = true
