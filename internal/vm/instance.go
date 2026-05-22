@@ -36,8 +36,10 @@ type Instance struct {
 	tables   []*Table
 	data     []dataInst
 	elems    []elemInst
+	objects  map[uint64]gcObject
 	resolver Resolver
 	exns     map[uint64]wasmException
+	nextObj  uint64
 	nextExn  uint64
 
 	// callDepth counts active WebAssembly calls in this instance. It is used
@@ -58,6 +60,21 @@ type funcInst struct {
 	// code is non-nil for module-defined functions. It is compiled once during
 	// instantiation from wasmir.Function into the VM's execution form.
 	code *function
+}
+
+type gcObjectKind uint8
+
+const (
+	gcObjectStruct gcObjectKind = iota
+	gcObjectArray
+)
+
+// gcObject is one VM-owned GC heap allocation.
+type gcObject struct {
+	kind      gcObjectKind
+	typeIndex uint32
+	fields    []Value
+	elems     []Value
 }
 
 // Tag is one instantiated exception tag identity.
@@ -246,7 +263,12 @@ func Instantiate(m *wasmir.Module, resolver Resolver) (*Instance, error) {
 	if m == nil {
 		return nil, fmt.Errorf("module is nil")
 	}
-	inst := &Instance{m: m, resolver: resolver, exns: map[uint64]wasmException{}}
+	inst := &Instance{
+		m:        m,
+		resolver: resolver,
+		objects:  map[uint64]gcObject{},
+		exns:     map[uint64]wasmException{},
+	}
 	if err := inst.buildMemories(); err != nil {
 		return nil, err
 	}
@@ -839,6 +861,12 @@ func (inst *Instance) evalConstExpr(init []wasmir.Instruction, constExpr bool) (
 				return Value{}, fmt.Errorf("initializer instruction %d: %w", pc, err)
 			}
 			stack = append(stack, Value{Type: wasmir.RefTypeFunc(false), Ref: Reference{Kind: RefKindFunc, FuncIndex: ins.FuncIndex, funcInst: inst}})
+		case wasmir.InstrRefI31:
+			v, err := popConstI32(&stack)
+			if err != nil {
+				return Value{}, fmt.Errorf("initializer instruction %d: %w", pc, err)
+			}
+			stack = append(stack, Value{Type: wasmir.RefTypeI31(false), Ref: Reference{Kind: RefKindI31, I31: v & 0x7fffffff}})
 		case wasmir.InstrGlobalGet:
 			if inst == nil {
 				return Value{}, fmt.Errorf("initializer instruction %d: instance is nil", pc)
@@ -883,6 +911,67 @@ func (inst *Instance) evalConstExpr(init []wasmir.Instruction, constExpr bool) (
 	return stack[0], nil
 }
 
+// newStructRef allocates a struct object in this instance and returns its
+// reference value.
+func (inst *Instance) newStructRef(typeIndex uint32, fields []Value) (Value, error) {
+	if inst == nil {
+		return Value{}, fmt.Errorf("instance is nil")
+	}
+	if int(typeIndex) >= len(inst.m.Types) || inst.m.Types[typeIndex].Kind != wasmir.TypeDefKindStruct {
+		return Value{}, fmt.Errorf("type index %d is not a struct type", typeIndex)
+	}
+	inst.nextObj++
+	id := inst.nextObj
+	inst.objects[id] = gcObject{
+		kind:      gcObjectStruct,
+		typeIndex: typeIndex,
+		fields:    slices.Clone(fields),
+	}
+	return Value{
+		Type: wasmir.RefTypeIndexed(typeIndex, false),
+		Ref:  Reference{Kind: RefKindStruct, objectID: id, objectInst: inst},
+	}, nil
+}
+
+// newArrayRef allocates an array object in this instance and returns its
+// reference value.
+func (inst *Instance) newArrayRef(typeIndex uint32, elems []Value) (Value, error) {
+	if inst == nil {
+		return Value{}, fmt.Errorf("instance is nil")
+	}
+	if int(typeIndex) >= len(inst.m.Types) || inst.m.Types[typeIndex].Kind != wasmir.TypeDefKindArray {
+		return Value{}, fmt.Errorf("type index %d is not an array type", typeIndex)
+	}
+	inst.nextObj++
+	id := inst.nextObj
+	inst.objects[id] = gcObject{
+		kind:      gcObjectArray,
+		typeIndex: typeIndex,
+		elems:     slices.Clone(elems),
+	}
+	return Value{
+		Type: wasmir.RefTypeIndexed(typeIndex, false),
+		Ref:  Reference{Kind: RefKindArray, objectID: id, objectInst: inst},
+	}, nil
+}
+
+// objectFromRef resolves a struct or array reference to the heap object it
+// names.
+func (inst *Instance) objectFromRef(ref Reference) (gcObject, error) {
+	owner := ref.objectInst
+	if owner == nil {
+		owner = inst
+	}
+	if owner == nil {
+		return gcObject{}, fmt.Errorf("instance is nil")
+	}
+	obj, ok := owner.objects[ref.objectID]
+	if !ok {
+		return gcObject{}, fmt.Errorf("object reference %d not found", ref.objectID)
+	}
+	return obj, nil
+}
+
 // evalI32ConstBinOp pops two i32 const-expression operands and pushes the i32
 // result of op.
 func evalI32ConstBinOp(stack *[]Value, op func(int32, int32) int32) error {
@@ -925,6 +1014,15 @@ func popConstValue(stack *[]Value, want wasmir.ValueType) (Value, error) {
 		return Value{}, fmt.Errorf("initializer got %s, want %s", v.Type, want)
 	}
 	return v, nil
+}
+
+// popConstI32 pops an i32 const-expression operand.
+func popConstI32(stack *[]Value) (int32, error) {
+	v, err := popConstValue(stack, wasmir.ValueTypeI32)
+	if err != nil {
+		return 0, err
+	}
+	return v.I32, nil
 }
 
 // globalGetValue returns the current value of the global at index.

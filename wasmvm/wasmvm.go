@@ -42,6 +42,15 @@ const (
 
 	// RefKindExn is a reference to a WebAssembly exception object.
 	RefKindExn = vm.RefKindExn
+
+	// RefKindI31 is an unboxed signed 31-bit integer reference.
+	RefKindI31 = vm.RefKindI31
+
+	// RefKindStruct is a reference to a WebAssembly GC struct object.
+	RefKindStruct = vm.RefKindStruct
+
+	// RefKindArray is a reference to a WebAssembly GC array object.
+	RefKindArray = vm.RefKindArray
 )
 
 // I32 returns a runtime Value whose type is wasmir.ValueTypeI32 and whose

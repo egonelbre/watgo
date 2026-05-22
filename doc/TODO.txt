@@ -3,7 +3,7 @@ Immediate TODOs
 
 vm:
 
-* 
+* wouldn't expectI32Result be geneally useful across many unit tests?
 
 Longer-term plans
 -----------------

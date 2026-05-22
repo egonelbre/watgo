@@ -129,6 +129,15 @@ const (
 
 	// RefKindExn is a reference to a WebAssembly exception object.
 	RefKindExn
+
+	// RefKindI31 is an unboxed signed 31-bit integer reference.
+	RefKindI31
+
+	// RefKindStruct is a reference to a VM-owned GC struct object.
+	RefKindStruct
+
+	// RefKindArray is a reference to a VM-owned GC array object.
+	RefKindArray
 )
 
 // Reference is one runtime reference value.
@@ -149,6 +158,16 @@ type Reference struct {
 	// ExnID is set when Kind is RefKindExn. It indexes the owning instance's
 	// exception-reference table.
 	ExnID uint64
+
+	// I31 is set when Kind is RefKindI31. Only the low 31 bits are used.
+	I31 int32
+
+	// objectID is set when Kind is RefKindStruct or RefKindArray. objectInst
+	// records the instance that owns the object, so shared tables can carry GC
+	// references across modules without exposing heap identities through
+	// wasmvm.Reference.
+	objectID   uint64
+	objectInst *Instance
 }
 
 // Resolver is the VM's narrow bridge to host-owned imports.
@@ -1205,6 +1224,100 @@ func (e *executor) run() ([]Value, error) {
 				return nil, e.instructionError(fmt.Errorf("ref.eq got %s and %s operands", v1.Type, v2.Type))
 			}
 			e.push(Value{Type: wasmir.ValueTypeI32, I32: boolI32(refsEqual(v1.Ref, v2.Ref))})
+		case wasmir.InstrRefTest:
+			target, err := e.refTypeImmediate(ins.index)
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			v, err := e.pop()
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			if !v.Type.IsRef() {
+				return nil, e.instructionError(fmt.Errorf("ref.test got %s operand", v.Type))
+			}
+			e.push(Value{Type: wasmir.ValueTypeI32, I32: boolI32(e.refMatches(v, target))})
+		case wasmir.InstrRefCast:
+			target, err := e.refTypeImmediate(ins.index)
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			v, err := e.pop()
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			if !v.Type.IsRef() {
+				return nil, e.instructionError(fmt.Errorf("ref.cast got %s operand", v.Type))
+			}
+			if !e.refMatches(v, target) {
+				return nil, e.instructionError(fmt.Errorf("cast failure"))
+			}
+			v.Type = target
+			e.push(v)
+		case wasmir.InstrRefI31:
+			v, err := e.popI32()
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			e.push(Value{Type: wasmir.RefTypeI31(false), Ref: Reference{Kind: RefKindI31, I31: v & 0x7fffffff}})
+		case wasmir.InstrI31GetS, wasmir.InstrI31GetU:
+			v, err := e.pop()
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			if !v.Type.IsRef() || v.Ref.Kind == RefKindNull {
+				return nil, e.instructionError(fmt.Errorf("null i31 reference"))
+			}
+			if v.Ref.Kind != RefKindI31 {
+				return nil, e.instructionError(fmt.Errorf("expected i31 reference"))
+			}
+			result := v.Ref.I31 & 0x7fffffff
+			if ins.kind == wasmir.InstrI31GetS {
+				result = (result << 1) >> 1
+			}
+			e.push(Value{Type: wasmir.ValueTypeI32, I32: result})
+		case wasmir.InstrStructNew:
+			v, err := e.newStruct(ins.index)
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			e.push(v)
+		case wasmir.InstrStructNewDefault:
+			v, err := e.newDefaultStruct(ins.index)
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			e.push(v)
+		case wasmir.InstrStructGet, wasmir.InstrStructGetS, wasmir.InstrStructGetU:
+			v, err := e.structGet(ins.kind, ins.index, uint32(ins.bits))
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			e.push(v)
+		case wasmir.InstrArrayNew:
+			v, err := e.newArray(ins.index)
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			e.push(v)
+		case wasmir.InstrArrayNewDefault:
+			v, err := e.newDefaultArray(ins.index)
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			e.push(v)
+		case wasmir.InstrArrayLen:
+			n, err := e.arrayLen()
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			e.push(Value{Type: wasmir.ValueTypeI32, I32: int32(n)})
+		case wasmir.InstrArrayGet, wasmir.InstrArrayGetS, wasmir.InstrArrayGetU:
+			v, err := e.arrayGet(ins.kind, ins.index)
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			e.push(v)
 		case wasmir.InstrExternConvertAny:
 			v, err := e.pop()
 			if err != nil {
@@ -1356,6 +1469,50 @@ func (e *executor) run() ([]Value, error) {
 				}
 				continue
 			}
+		case wasmir.InstrBrOnCast:
+			cast, err := e.castTypeImmediate(ins.index)
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			v, err := e.pop()
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			if !v.Type.IsRef() {
+				return nil, e.instructionError(fmt.Errorf("br_on_cast got %s operand", v.Type))
+			}
+			if e.refMatches(v, cast.target) {
+				v.Type = cast.target
+				e.push(v)
+				if err := e.branchTo(uint32(ins.bits), ins.target); err != nil {
+					return nil, e.instructionError(err)
+				}
+				continue
+			}
+			v.Type = cast.source
+			e.push(v)
+		case wasmir.InstrBrOnCastFail:
+			cast, err := e.castTypeImmediate(ins.index)
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			v, err := e.pop()
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			if !v.Type.IsRef() {
+				return nil, e.instructionError(fmt.Errorf("br_on_cast_fail got %s operand", v.Type))
+			}
+			if !e.refMatches(v, cast.target) {
+				v.Type = cast.source
+				e.push(v)
+				if err := e.branchTo(uint32(ins.bits), ins.target); err != nil {
+					return nil, e.instructionError(err)
+				}
+				continue
+			}
+			v.Type = cast.target
+			e.push(v)
 		case wasmir.InstrBrTable:
 			// br_table consumes only the i32 selector. Branch result values, if
 			// any, are already below it on the operand stack and are left there
@@ -1886,6 +2043,407 @@ func (e *executor) evalTypedSelect(selectTypeIndex uint32) (Value, error) {
 	return v2, nil
 }
 
+// refTypeImmediate returns the compiled reference type at index.
+func (e *executor) refTypeImmediate(index uint32) (wasmir.ValueType, error) {
+	if int(index) >= len(e.fn.refTypes) {
+		return wasmir.ValueType{}, fmt.Errorf("reference type index %d out of range", index)
+	}
+	return e.fn.refTypes[index], nil
+}
+
+// castTypeImmediate returns the compiled br_on_cast type pair at index.
+func (e *executor) castTypeImmediate(index uint32) (castTypeImmediate, error) {
+	if int(index) >= len(e.fn.castTypes) {
+		return castTypeImmediate{}, fmt.Errorf("cast type index %d out of range", index)
+	}
+	return e.fn.castTypes[index], nil
+}
+
+// refMatches reports whether v satisfies target at runtime.
+func (e *executor) refMatches(v Value, target wasmir.ValueType) bool {
+	if !v.Type.IsRef() || !target.IsRef() {
+		return false
+	}
+	if v.Ref.Kind == RefKindNull {
+		return target.Nullable
+	}
+	if v.Type.HeapType.Kind == wasmir.HeapKindExtern {
+		return target.HeapType.Kind == wasmir.HeapKindExtern
+	}
+	switch target.HeapType.Kind {
+	case wasmir.HeapKindAny:
+		return refInAnyHierarchy(v.Ref)
+	case wasmir.HeapKindEq:
+		return refInEqHierarchy(v.Ref)
+	case wasmir.HeapKindI31:
+		return v.Ref.Kind == RefKindI31
+	case wasmir.HeapKindStruct:
+		return v.Ref.Kind == RefKindStruct
+	case wasmir.HeapKindArray:
+		return v.Ref.Kind == RefKindArray
+	case wasmir.HeapKindFunc:
+		return v.Ref.Kind == RefKindFunc
+	case wasmir.HeapKindExtern:
+		return v.Ref.Kind == RefKindExtern
+	case wasmir.HeapKindExn:
+		return v.Ref.Kind == RefKindExn
+	case wasmir.HeapKindTypeIndex:
+		return e.refMatchesTypeIndex(v.Ref, target.HeapType.TypeIndex)
+	default:
+		return false
+	}
+}
+
+// refMatchesTypeIndex reports whether ref satisfies an indexed heap type.
+func (e *executor) refMatchesTypeIndex(ref Reference, targetType uint32) bool {
+	if e.inst == nil || int(targetType) >= len(e.inst.m.Types) {
+		return false
+	}
+	target := e.inst.m.Types[targetType]
+	switch ref.Kind {
+	case RefKindFunc:
+		if target.Kind != wasmir.TypeDefKindFunc {
+			return false
+		}
+		inst := ref.funcInst
+		if inst == nil {
+			inst = e.inst
+		}
+		got, err := inst.FuncTypeIndex(ref.FuncIndex)
+		return err == nil && typeequiv.Types(inst.m, got, e.inst.m, targetType)
+	case RefKindStruct, RefKindArray:
+		obj, err := e.inst.objectFromRef(ref)
+		if err != nil {
+			return false
+		}
+		if target.Kind == wasmir.TypeDefKindStruct && ref.Kind != RefKindStruct {
+			return false
+		}
+		if target.Kind == wasmir.TypeDefKindArray && ref.Kind != RefKindArray {
+			return false
+		}
+		return isRuntimeTypeIndexSubtype(e.inst.m, obj.typeIndex, targetType)
+	default:
+		return false
+	}
+}
+
+// refInAnyHierarchy reports whether ref belongs to the any hierarchy.
+func refInAnyHierarchy(ref Reference) bool {
+	switch ref.Kind {
+	case RefKindI31, RefKindStruct, RefKindArray, RefKindExtern:
+		return true
+	default:
+		return false
+	}
+}
+
+// refInEqHierarchy reports whether ref belongs to the eq hierarchy.
+func refInEqHierarchy(ref Reference) bool {
+	switch ref.Kind {
+	case RefKindI31, RefKindStruct, RefKindArray:
+		return true
+	default:
+		return false
+	}
+}
+
+// isRuntimeTypeIndexSubtype checks nominal subtype reachability for one module.
+func isRuntimeTypeIndexSubtype(m *wasmir.Module, got uint32, want uint32) bool {
+	if got == want || typeequiv.Types(m, got, m, want) {
+		return true
+	}
+	if m == nil || int(got) >= len(m.Types) || int(want) >= len(m.Types) {
+		return false
+	}
+	seen := map[uint32]bool{}
+	stack := []uint32{got}
+	for len(stack) > 0 {
+		idx := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if seen[idx] {
+			continue
+		}
+		seen[idx] = true
+		for _, super := range m.Types[idx].SuperTypes {
+			if super == want || typeequiv.Types(m, super, m, want) {
+				return true
+			}
+			stack = append(stack, super)
+		}
+	}
+	return false
+}
+
+// newStruct pops field values and allocates a struct object.
+func (e *executor) newStruct(typeIndex uint32) (Value, error) {
+	if e.inst == nil {
+		return Value{}, fmt.Errorf("instance is nil")
+	}
+	td, err := e.typeDef(typeIndex, wasmir.TypeDefKindStruct)
+	if err != nil {
+		return Value{}, err
+	}
+	fieldTypes := make([]wasmir.ValueType, len(td.Fields))
+	for i, field := range td.Fields {
+		fieldTypes[i] = fieldValueType(field)
+	}
+	values, err := e.popArgs(fieldTypes)
+	if err != nil {
+		return Value{}, err
+	}
+	return e.inst.newStructRef(typeIndex, normalizeFieldValues(td.Fields, values))
+}
+
+// newDefaultStruct allocates a struct object with default field values.
+func (e *executor) newDefaultStruct(typeIndex uint32) (Value, error) {
+	if e.inst == nil {
+		return Value{}, fmt.Errorf("instance is nil")
+	}
+	td, err := e.typeDef(typeIndex, wasmir.TypeDefKindStruct)
+	if err != nil {
+		return Value{}, err
+	}
+	values := make([]Value, len(td.Fields))
+	for i, field := range td.Fields {
+		value, err := defaultFieldValue(field)
+		if err != nil {
+			return Value{}, err
+		}
+		values[i] = value
+	}
+	return e.inst.newStructRef(typeIndex, values)
+}
+
+// structGet reads one struct field and applies packed-field extension.
+func (e *executor) structGet(kind wasmir.InstrKind, typeIndex uint32, fieldIndex uint32) (Value, error) {
+	if e.inst == nil {
+		return Value{}, fmt.Errorf("instance is nil")
+	}
+	td, err := e.typeDef(typeIndex, wasmir.TypeDefKindStruct)
+	if err != nil {
+		return Value{}, err
+	}
+	if int(fieldIndex) >= len(td.Fields) {
+		return Value{}, fmt.Errorf("field index %d out of range", fieldIndex)
+	}
+	ref, err := e.pop()
+	if err != nil {
+		return Value{}, err
+	}
+	if !ref.Type.IsRef() || ref.Ref.Kind == RefKindNull {
+		return Value{}, fmt.Errorf("null struct reference")
+	}
+	if ref.Ref.Kind != RefKindStruct {
+		return Value{}, fmt.Errorf("expected struct reference")
+	}
+	obj, err := e.inst.objectFromRef(ref.Ref)
+	if err != nil {
+		return Value{}, err
+	}
+	if obj.kind != gcObjectStruct || !isRuntimeTypeIndexSubtype(e.inst.m, obj.typeIndex, typeIndex) {
+		return Value{}, fmt.Errorf("struct type mismatch")
+	}
+	value := obj.fields[fieldIndex]
+	return extendPackedField(kind, td.Fields[fieldIndex], value)
+}
+
+// newArray pops an array element and length and allocates an array object.
+func (e *executor) newArray(typeIndex uint32) (Value, error) {
+	if e.inst == nil {
+		return Value{}, fmt.Errorf("instance is nil")
+	}
+	td, err := e.typeDef(typeIndex, wasmir.TypeDefKindArray)
+	if err != nil {
+		return Value{}, err
+	}
+	length, err := e.popI32()
+	if err != nil {
+		return Value{}, err
+	}
+	elem, err := e.popWant(fieldValueType(td.ElemField))
+	if err != nil {
+		return Value{}, err
+	}
+	elems, err := repeatedFieldValues(td.ElemField, elem, uint32(length))
+	if err != nil {
+		return Value{}, err
+	}
+	return e.inst.newArrayRef(typeIndex, elems)
+}
+
+// newDefaultArray pops a length and allocates an array with default elements.
+func (e *executor) newDefaultArray(typeIndex uint32) (Value, error) {
+	if e.inst == nil {
+		return Value{}, fmt.Errorf("instance is nil")
+	}
+	td, err := e.typeDef(typeIndex, wasmir.TypeDefKindArray)
+	if err != nil {
+		return Value{}, err
+	}
+	length, err := e.popI32()
+	if err != nil {
+		return Value{}, err
+	}
+	elem, err := defaultFieldValue(td.ElemField)
+	if err != nil {
+		return Value{}, err
+	}
+	elems, err := repeatedFieldValues(td.ElemField, elem, uint32(length))
+	if err != nil {
+		return Value{}, err
+	}
+	return e.inst.newArrayRef(typeIndex, elems)
+}
+
+// arrayLen returns the length of an array object.
+func (e *executor) arrayLen() (uint32, error) {
+	if e.inst == nil {
+		return 0, fmt.Errorf("instance is nil")
+	}
+	ref, err := e.pop()
+	if err != nil {
+		return 0, err
+	}
+	if !ref.Type.IsRef() || ref.Ref.Kind == RefKindNull {
+		return 0, fmt.Errorf("null array reference")
+	}
+	if ref.Ref.Kind != RefKindArray {
+		return 0, fmt.Errorf("expected array reference")
+	}
+	obj, err := e.inst.objectFromRef(ref.Ref)
+	if err != nil {
+		return 0, err
+	}
+	return uint32(len(obj.elems)), nil
+}
+
+// arrayGet reads one array element and applies packed-field extension.
+func (e *executor) arrayGet(kind wasmir.InstrKind, typeIndex uint32) (Value, error) {
+	if e.inst == nil {
+		return Value{}, fmt.Errorf("instance is nil")
+	}
+	td, err := e.typeDef(typeIndex, wasmir.TypeDefKindArray)
+	if err != nil {
+		return Value{}, err
+	}
+	index, err := e.popI32()
+	if err != nil {
+		return Value{}, err
+	}
+	ref, err := e.pop()
+	if err != nil {
+		return Value{}, err
+	}
+	if !ref.Type.IsRef() || ref.Ref.Kind == RefKindNull {
+		return Value{}, fmt.Errorf("null array reference")
+	}
+	if ref.Ref.Kind != RefKindArray {
+		return Value{}, fmt.Errorf("expected array reference")
+	}
+	obj, err := e.inst.objectFromRef(ref.Ref)
+	if err != nil {
+		return Value{}, err
+	}
+	if obj.kind != gcObjectArray || !isRuntimeTypeIndexSubtype(e.inst.m, obj.typeIndex, typeIndex) {
+		return Value{}, fmt.Errorf("array type mismatch")
+	}
+	if uint32(index) >= uint32(len(obj.elems)) {
+		return Value{}, fmt.Errorf("array index out of bounds")
+	}
+	return extendPackedField(kind, td.ElemField, obj.elems[uint32(index)])
+}
+
+// typeDef returns a module type definition with kind checking.
+func (e *executor) typeDef(typeIndex uint32, kind wasmir.TypeDefKind) (wasmir.TypeDef, error) {
+	if e.inst == nil || int(typeIndex) >= len(e.inst.m.Types) {
+		return wasmir.TypeDef{}, fmt.Errorf("type index %d out of range", typeIndex)
+	}
+	td := e.inst.m.Types[typeIndex]
+	if td.Kind != kind {
+		return wasmir.TypeDef{}, fmt.Errorf("type index %d has kind %d, want %d", typeIndex, td.Kind, kind)
+	}
+	return td, nil
+}
+
+// fieldValueType returns the stack value type for a struct or array field.
+func fieldValueType(field wasmir.FieldType) wasmir.ValueType {
+	if field.Packed != wasmir.PackedTypeNone {
+		return wasmir.ValueTypeI32
+	}
+	return field.Type
+}
+
+// defaultFieldValue returns the WebAssembly default value for field.
+func defaultFieldValue(field wasmir.FieldType) (Value, error) {
+	if field.Packed != wasmir.PackedTypeNone {
+		return Value{Type: wasmir.ValueTypeI32}, nil
+	}
+	return zeroValue(field.Type)
+}
+
+// normalizeFieldValues truncates packed fields to their storage width.
+func normalizeFieldValues(fields []wasmir.FieldType, values []Value) []Value {
+	out := make([]Value, len(values))
+	for i, value := range values {
+		out[i] = normalizeFieldValue(fields[i], value)
+	}
+	return out
+}
+
+// normalizeFieldValue truncates value when field uses packed storage.
+func normalizeFieldValue(field wasmir.FieldType, value Value) Value {
+	switch field.Packed {
+	case wasmir.PackedTypeI8:
+		value.I32 = int32(uint8(value.I32))
+	case wasmir.PackedTypeI16:
+		value.I32 = int32(uint16(value.I32))
+	}
+	return value
+}
+
+// repeatedFieldValues returns count copies of value after field normalization.
+func repeatedFieldValues(field wasmir.FieldType, value Value, count uint32) ([]Value, error) {
+	if uint64(count) > uint64(int(^uint(0)>>1)) {
+		return nil, fmt.Errorf("array length %d is too large", count)
+	}
+	value = normalizeFieldValue(field, value)
+	elems := make([]Value, int(count))
+	for i := range elems {
+		elems[i] = value
+	}
+	return elems, nil
+}
+
+// extendPackedField applies signed or unsigned extension for packed field
+// reads.
+func extendPackedField(kind wasmir.InstrKind, field wasmir.FieldType, value Value) (Value, error) {
+	switch field.Packed {
+	case wasmir.PackedTypeI8:
+		switch kind {
+		case wasmir.InstrStructGetS, wasmir.InstrArrayGetS:
+			value.I32 = int32(int8(value.I32))
+		default:
+			value.I32 = int32(uint8(value.I32))
+		}
+		return value, nil
+	case wasmir.PackedTypeI16:
+		switch kind {
+		case wasmir.InstrStructGetS, wasmir.InstrArrayGetS:
+			value.I32 = int32(int16(value.I32))
+		default:
+			value.I32 = int32(uint16(value.I32))
+		}
+		return value, nil
+	default:
+		if kind == wasmir.InstrStructGetS || kind == wasmir.InstrStructGetU ||
+			kind == wasmir.InstrArrayGetS || kind == wasmir.InstrArrayGetU {
+			return Value{}, fmt.Errorf("packed field extension on unpacked field")
+		}
+		return value, nil
+	}
+}
+
 // refsEqual reports whether two runtime references have the same identity.
 func refsEqual(a Reference, b Reference) bool {
 	if a.Kind != b.Kind {
@@ -1898,6 +2456,10 @@ func refsEqual(a Reference, b Reference) bool {
 		return a.FuncIndex == b.FuncIndex && a.funcInst == b.funcInst
 	case RefKindExtern:
 		return a.ExternID == b.ExternID
+	case RefKindI31:
+		return a.I31 == b.I31
+	case RefKindStruct, RefKindArray:
+		return a.objectID == b.objectID && a.objectInst == b.objectInst
 	default:
 		return false
 	}

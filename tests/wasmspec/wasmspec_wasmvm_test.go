@@ -33,13 +33,7 @@ var wasmSpecWasmvmDeniedScripts = []string{
 	"scripts/gc/array_init_elem.wast",
 	"scripts/gc/array_new_data.wast",
 	"scripts/gc/array_new_elem.wast",
-	"scripts/gc/br_on_cast.wast",
-	"scripts/gc/br_on_cast_fail.wast",
 	"scripts/gc/extern.wast",
-	"scripts/gc/i31.wast",
-	"scripts/gc/ref_cast.wast",
-	"scripts/gc/ref_eq.wast",
-	"scripts/gc/ref_test.wast",
 	"scripts/gc/struct.wast",
 	"scripts/gc/type-subtyping.wast",
 
@@ -974,7 +968,16 @@ func wasmvmValueToRuntimeValue(value wasmvm.Value) (runtimeValue, error) {
 		if value.Ref.Kind == wasmvm.RefKindExtern {
 			return runtimeValue{scalar: encodedRefExternTag | value.Ref.ExternID}, nil
 		}
-		return runtimeValue{scalar: 1}, nil
+		switch value.Ref.Kind {
+		case wasmvm.RefKindI31:
+			return runtimeValue{scalar: encodedRefI31}, nil
+		case wasmvm.RefKindStruct:
+			return runtimeValue{scalar: encodedRefStruct}, nil
+		case wasmvm.RefKindArray:
+			return runtimeValue{scalar: encodedRefArray}, nil
+		default:
+			return runtimeValue{scalar: encodedRefEq}, nil
+		}
 	default:
 		return runtimeValue{}, fmt.Errorf("unsupported wasmvm value type %s", value.Type)
 	}

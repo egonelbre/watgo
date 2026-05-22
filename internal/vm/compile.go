@@ -37,9 +37,14 @@ type function struct {
 	branchTables [][]branchTarget
 
 	// refTypes stores reference type immediates used by ref.null instructions.
-	// A ref.null instruction keeps its fixed-size instr small by storing the
-	// index of its type immediate in instr.index.
+	// A ref.null, ref.test, or ref.cast instruction keeps its fixed-size instr
+	// small by storing the index of its type immediate in instr.index.
 	refTypes []wasmir.ValueType
+
+	// castTypes stores the source and destination reference type immediates used
+	// by br_on_cast and br_on_cast_fail. The instruction stores its castTypes
+	// index in instr.index.
+	castTypes []castTypeImmediate
 
 	// selectTypes stores explicit result type immediates used by typed select.
 	// A typed select instruction stores its selectTypes index in instr.bits;
@@ -73,6 +78,12 @@ type laneMemoryImmediate struct {
 	memoryIndex uint32
 	offset      uint64
 	lane        uint32
+}
+
+// castTypeImmediate is the immediate payload for br_on_cast instructions.
+type castTypeImmediate struct {
+	source wasmir.ValueType
+	target wasmir.ValueType
 }
 
 // instr is one instruction in the VM's execution form.
@@ -189,8 +200,22 @@ func compileFunction(m *wasmir.Module, fn *wasmir.Function) (*function, error) {
 		case wasmir.InstrRefNull:
 			op.index = uint32(len(out.refTypes))
 			out.refTypes = append(out.refTypes, ins.RefType)
+		case wasmir.InstrRefTest, wasmir.InstrRefCast:
+			op.index = uint32(len(out.refTypes))
+			out.refTypes = append(out.refTypes, ins.RefType)
 		case wasmir.InstrRefFunc:
 			op.index = ins.FuncIndex
+		case wasmir.InstrStructNew, wasmir.InstrStructNewDefault,
+			wasmir.InstrArrayNew, wasmir.InstrArrayNewDefault,
+			wasmir.InstrArrayLen:
+			op.index = ins.TypeIndex
+		case wasmir.InstrStructGet, wasmir.InstrStructGetS, wasmir.InstrStructGetU,
+			wasmir.InstrStructSet:
+			op.index = ins.TypeIndex
+			op.bits = int64(ins.FieldIndex)
+		case wasmir.InstrArrayGet, wasmir.InstrArrayGetS, wasmir.InstrArrayGetU,
+			wasmir.InstrArraySet:
+			op.index = ins.TypeIndex
 		case wasmir.InstrGlobalGet, wasmir.InstrGlobalSet:
 			op.index = ins.GlobalIndex
 		case wasmir.InstrMemorySize, wasmir.InstrMemoryGrow, wasmir.InstrMemoryFill:
@@ -256,6 +281,18 @@ func compileFunction(m *wasmir.Module, fn *wasmir.Function) (*function, error) {
 			}
 			op.target = target.pc
 			op.bits = int64(target.depth)
+		case wasmir.InstrBrOnCast, wasmir.InstrBrOnCastFail:
+			target, err := compileBranchTarget(ins.BranchDepth, labelStack, ctrl, finalEnd)
+			if err != nil {
+				return nil, fmt.Errorf("%s at %d: %w", instrName(ins.Kind), pc, err)
+			}
+			op.target = target.pc
+			op.bits = int64(target.depth)
+			op.index = uint32(len(out.castTypes))
+			out.castTypes = append(out.castTypes, castTypeImmediate{
+				source: ins.SourceRefType,
+				target: ins.RefType,
+			})
 		case wasmir.InstrBrTable:
 			targets := make([]branchTarget, 0, len(ins.BranchTable)+1)
 			for i, depth := range ins.BranchTable {
@@ -348,7 +385,8 @@ func compileFunction(m *wasmir.Module, fn *wasmir.Function) (*function, error) {
 			wasmir.InstrDrop, wasmir.InstrNop, wasmir.InstrUnreachable,
 			wasmir.InstrThrowRef,
 			wasmir.InstrRefIsNull, wasmir.InstrRefAsNonNull,
-			wasmir.InstrRefEq, wasmir.InstrExternConvertAny, wasmir.InstrAnyConvertExtern,
+			wasmir.InstrRefEq, wasmir.InstrRefI31, wasmir.InstrI31GetS, wasmir.InstrI31GetU,
+			wasmir.InstrExternConvertAny, wasmir.InstrAnyConvertExtern,
 			wasmir.InstrI8x16Splat, wasmir.InstrI16x8Splat, wasmir.InstrI32x4Splat,
 			wasmir.InstrI64x2Splat, wasmir.InstrF32x4Splat, wasmir.InstrF64x2Splat,
 			wasmir.InstrV128AnyTrue, wasmir.InstrV128Not,
