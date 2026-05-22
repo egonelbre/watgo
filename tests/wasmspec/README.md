@@ -45,8 +45,7 @@ and observe mutated memory/table/global state.
 ## Backends
 
 The Node backend is the broad compatibility backend and runs the full corpus.
-The `wasmvm` backend discovers the corpus too, then filters out a deny list for
-unsupported or partially implemented features.
+The `wasmvm` backend discovers and runs the same checked-in script corpus.
 
 For local triage, `-wasmspec.wasmvm-scripts` can override the `wasmvm` script
 list with comma-separated `scripts/...` paths:

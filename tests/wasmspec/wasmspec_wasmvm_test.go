@@ -23,10 +23,6 @@ var wasmSpecWasmvmScriptsFlag = flag.String(
 	"comma-separated wasmspec scripts to run through the wasmvm backend",
 )
 
-// wasmSpecWasmvmDeniedScripts lists spec scripts not currently run through the
-// wasmvm backend. Entries ending in "/" deny an entire directory subtree.
-var wasmSpecWasmvmDeniedScripts = []string{}
-
 type wasmSpecWasmvmRunner struct {
 	rt                 *wasmvm.Runtime
 	imports            wasmvm.Imports
@@ -74,8 +70,7 @@ func wasmSpecWasmvmSelectedScripts(t *testing.T) []string {
 	return scripts
 }
 
-// wasmSpecWasmvmDiscoveredScripts returns all checked-in wasmspec scripts
-// except entries currently denied for the wasmvm backend.
+// wasmSpecWasmvmDiscoveredScripts returns all checked-in wasmspec scripts.
 func wasmSpecWasmvmDiscoveredScripts(t *testing.T) []string {
 	t.Helper()
 
@@ -83,33 +78,10 @@ func wasmSpecWasmvmDiscoveredScripts(t *testing.T) []string {
 	if err != nil {
 		t.Fatalf("findWasmSpecScripts %q failed: %v", wasmSpecScriptsDir, err)
 	}
-	var selected []string
-	for _, script := range scripts {
-		scriptPath := filepath.ToSlash(filepath.Join(wasmSpecScriptsDir, script))
-		if wasmSpecWasmvmScriptDenied(scriptPath) {
-			continue
-		}
-		selected = append(selected, scriptPath)
+	for i, script := range scripts {
+		scripts[i] = filepath.Join(wasmSpecScriptsDir, script)
 	}
-	return selected
-}
-
-// wasmSpecWasmvmScriptDenied reports whether scriptPath is denied for wasmvm.
-func wasmSpecWasmvmScriptDenied(scriptPath string) bool {
-	scriptPath = filepath.ToSlash(scriptPath)
-	for _, denied := range wasmSpecWasmvmDeniedScripts {
-		denied = filepath.ToSlash(denied)
-		if strings.HasSuffix(denied, "/") {
-			if strings.HasPrefix(scriptPath, denied) {
-				return true
-			}
-			continue
-		}
-		if scriptPath == denied {
-			return true
-		}
-	}
-	return false
+	return scripts
 }
 
 // newWasmSpecWasmvmRunner creates an empty wasmvm script runner.
