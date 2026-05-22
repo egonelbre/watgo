@@ -27,9 +27,9 @@ func TestMemoryI32LoadStore(t *testing.T) {
 		t.Fatalf("Instantiate failed: %v", err)
 	}
 
-	expectI32Result(t, inst, "zero", wasmvm.I32(0))
+	expectI32Result(t, inst, "zero", 0)
 
-	expectI32Result(t, inst, "roundtrip", wasmvm.I32(0x12345678), wasmvm.I32(12), wasmvm.I32(0x12345678))
+	expectI32Result(t, inst, "roundtrip", 0x12345678, wasmvm.I32(12), wasmvm.I32(0x12345678))
 }
 
 func TestActiveDataSegments(t *testing.T) {
@@ -53,9 +53,9 @@ func TestActiveDataSegments(t *testing.T) {
 		t.Fatalf("Instantiate failed: %v", err)
 	}
 
-	expectI32Result(t, inst, "load0", wasmvm.I32(0x44434241))
+	expectI32Result(t, inst, "load0", 0x44434241)
 
-	expectI32Result(t, inst, "load1", wasmvm.I32(0x5a595857))
+	expectI32Result(t, inst, "load1", 0x5a595857)
 }
 
 func TestI32NarrowMemoryOps(t *testing.T) {
@@ -106,7 +106,7 @@ func TestI32NarrowMemoryOps(t *testing.T) {
 		{name: "store8", want: 0x78},
 		{name: "store16", want: 0x5678},
 	} {
-		expectI32Result(t, inst, tt.name, wasmvm.I32(tt.want))
+		expectI32Result(t, inst, tt.name, tt.want)
 	}
 }
 
@@ -144,25 +144,10 @@ func TestScalarMemoryOps(t *testing.T) {
 		t.Fatalf("Instantiate failed: %v", err)
 	}
 
-	results := callExport(t, inst, "load_i64")
-	if len(results) != 1 || results[0] != wasmvm.I64(0x0807060504030201) {
-		t.Fatalf("load_i64 got results %#v, want i64 0x0807060504030201", results)
-	}
-
-	results = callExport(t, inst, "roundtrip_i64", wasmvm.I64(-1234567890123))
-	if len(results) != 1 || results[0] != wasmvm.I64(-1234567890123) {
-		t.Fatalf("roundtrip_i64 got results %#v, want i64 -1234567890123", results)
-	}
-
-	results = callExport(t, inst, "roundtrip_f32", wasmvm.F32(12.5))
-	if len(results) != 1 || results[0] != wasmvm.F32(12.5) {
-		t.Fatalf("roundtrip_f32 got results %#v, want f32 12.5", results)
-	}
-
-	results = callExport(t, inst, "roundtrip_f64", wasmvm.F64(-9.25))
-	if len(results) != 1 || results[0] != wasmvm.F64(-9.25) {
-		t.Fatalf("roundtrip_f64 got results %#v, want f64 -9.25", results)
-	}
+	expectValueResult(t, inst, "load_i64", wasmvm.I64(0x0807060504030201))
+	expectValueResult(t, inst, "roundtrip_i64", wasmvm.I64(-1234567890123), wasmvm.I64(-1234567890123))
+	expectValueResult(t, inst, "roundtrip_f32", wasmvm.F32(12.5), wasmvm.F32(12.5))
+	expectValueResult(t, inst, "roundtrip_f64", wasmvm.F64(-9.25), wasmvm.F64(-9.25))
 }
 
 // TestMemory64ScalarOps checks that memory64 load/store instructions consume
@@ -190,17 +175,10 @@ func TestMemory64ScalarOps(t *testing.T) {
 		t.Fatalf("Instantiate failed: %v", err)
 	}
 
-	expectI32Result(t, inst, "load_i32", wasmvm.I32(0x04030201))
+	expectI32Result(t, inst, "load_i32", 0x04030201)
 
-	results := callExport(t, inst, "load_i64")
-	if len(results) != 1 || results[0] != wasmvm.I64(0x0807060504030201) {
-		t.Fatalf("load_i64 got results %#v, want i64 0x0807060504030201", results)
-	}
-
-	results = callExport(t, inst, "roundtrip_f64", wasmvm.F64(-9.25))
-	if len(results) != 1 || results[0] != wasmvm.F64(-9.25) {
-		t.Fatalf("roundtrip_f64 got results %#v, want f64 -9.25", results)
-	}
+	expectValueResult(t, inst, "load_i64", wasmvm.I64(0x0807060504030201))
+	expectValueResult(t, inst, "roundtrip_f64", wasmvm.F64(-9.25), wasmvm.F64(-9.25))
 }
 
 // TestMemory64SizeAndGrow checks that memory.size and memory.grow use i64
@@ -220,20 +198,9 @@ func TestMemory64SizeAndGrow(t *testing.T) {
 		t.Fatalf("Instantiate failed: %v", err)
 	}
 
-	results := callExport(t, inst, "size")
-	if len(results) != 1 || results[0] != wasmvm.I64(1) {
-		t.Fatalf("size got results %#v, want i64 1", results)
-	}
-
-	results = callExport(t, inst, "grow", wasmvm.I64(1))
-	if len(results) != 1 || results[0] != wasmvm.I64(1) {
-		t.Fatalf("grow got results %#v, want old size i64 1", results)
-	}
-
-	results = callExport(t, inst, "grow", wasmvm.I64(1))
-	if len(results) != 1 || results[0] != wasmvm.I64(-1) {
-		t.Fatalf("failed grow got results %#v, want i64 -1", results)
-	}
+	expectValueResult(t, inst, "size", wasmvm.I64(1))
+	expectValueResult(t, inst, "grow", wasmvm.I64(1), wasmvm.I64(1))
+	expectValueResult(t, inst, "grow", wasmvm.I64(-1), wasmvm.I64(1))
 }
 
 // TestMemory64BulkOps checks that memory64 bulk-memory instructions consume

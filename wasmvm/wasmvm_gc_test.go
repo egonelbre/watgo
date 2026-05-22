@@ -24,8 +24,8 @@ func TestGCRefI31(t *testing.T) {
 		t.Fatalf("Instantiate failed: %v", err)
 	}
 
-	expectI32Result(t, inst, "get_u", wasmvm.I32(0x7fffffff), wasmvm.I32(-1))
-	expectI32Result(t, inst, "get_s", wasmvm.I32(-0x40000000), wasmvm.I32(0x40000000))
+	expectI32Result(t, inst, "get_u", 0x7fffffff, wasmvm.I32(-1))
+	expectI32Result(t, inst, "get_s", -0x40000000, wasmvm.I32(0x40000000))
 }
 
 // TestGCRefEq checks equality over the GC eq hierarchy.
@@ -64,11 +64,11 @@ func TestGCRefEq(t *testing.T) {
 		t.Fatalf("Instantiate failed: %v", err)
 	}
 
-	expectI32Result(t, inst, "same_i31", wasmvm.I32(1), wasmvm.I32(7), wasmvm.I32(7))
-	expectI32Result(t, inst, "same_i31", wasmvm.I32(0), wasmvm.I32(7), wasmvm.I32(8))
-	expectI32Result(t, inst, "same_struct_ref", wasmvm.I32(1))
-	expectI32Result(t, inst, "different_struct_refs", wasmvm.I32(0))
-	expectI32Result(t, inst, "different_array_refs", wasmvm.I32(0))
+	expectI32Result(t, inst, "same_i31", 1, wasmvm.I32(7), wasmvm.I32(7))
+	expectI32Result(t, inst, "same_i31", 0, wasmvm.I32(7), wasmvm.I32(8))
+	expectI32Result(t, inst, "same_struct_ref", 1)
+	expectI32Result(t, inst, "different_struct_refs", 0)
+	expectI32Result(t, inst, "different_array_refs", 0)
 }
 
 // TestGCRefTest checks runtime type tests for the first supported GC refs.
@@ -102,11 +102,11 @@ func TestGCRefTest(t *testing.T) {
 		t.Fatalf("Instantiate failed: %v", err)
 	}
 
-	expectI32Result(t, inst, "i31_is_i31", wasmvm.I32(1))
-	expectI32Result(t, inst, "struct_is_struct", wasmvm.I32(1))
-	expectI32Result(t, inst, "array_is_array", wasmvm.I32(1))
-	expectI32Result(t, inst, "i31_is_struct", wasmvm.I32(0))
-	expectI32Result(t, inst, "null_is_i31ref", wasmvm.I32(1))
+	expectI32Result(t, inst, "i31_is_i31", 1)
+	expectI32Result(t, inst, "struct_is_struct", 1)
+	expectI32Result(t, inst, "array_is_array", 1)
+	expectI32Result(t, inst, "i31_is_struct", 0)
+	expectI32Result(t, inst, "null_is_i31ref", 1)
 }
 
 // TestGCRefCast checks successful casts and cast-failure traps.
@@ -136,8 +136,8 @@ func TestGCRefCast(t *testing.T) {
 		t.Fatalf("Instantiate failed: %v", err)
 	}
 
-	expectI32Result(t, inst, "cast_i31", wasmvm.I32(42), wasmvm.I32(42))
-	expectI32Result(t, inst, "cast_struct", wasmvm.I32(42))
+	expectI32Result(t, inst, "cast_i31", 42, wasmvm.I32(42))
+	expectI32Result(t, inst, "cast_struct", 42)
 
 	f, ok := inst.ExportedFunc("cast_i31_to_struct")
 	if !ok {
@@ -193,10 +193,10 @@ func TestGCBranchCast(t *testing.T) {
 		t.Fatalf("Instantiate failed: %v", err)
 	}
 
-	expectI32Result(t, inst, "struct_or_minus_one", wasmvm.I32(41), wasmvm.I32(0))
-	expectI32Result(t, inst, "struct_or_minus_one", wasmvm.I32(-1), wasmvm.I32(1))
-	expectI32Result(t, inst, "array_len_or_minus_one", wasmvm.I32(-1), wasmvm.I32(0))
-	expectI32Result(t, inst, "array_len_or_minus_one", wasmvm.I32(2), wasmvm.I32(1))
+	expectI32Result(t, inst, "struct_or_minus_one", 41, wasmvm.I32(0))
+	expectI32Result(t, inst, "struct_or_minus_one", -1, wasmvm.I32(1))
+	expectI32Result(t, inst, "array_len_or_minus_one", -1, wasmvm.I32(0))
+	expectI32Result(t, inst, "array_len_or_minus_one", 2, wasmvm.I32(1))
 }
 
 // TestGCBranchCastFail checks that br_on_cast_fail branches only when the
@@ -232,8 +232,8 @@ func TestGCBranchCastFail(t *testing.T) {
 		t.Fatalf("Instantiate failed: %v", err)
 	}
 
-	expectI32Result(t, inst, "array_fails_struct_cast", wasmvm.I32(0), wasmvm.I32(0))
-	expectI32Result(t, inst, "array_fails_struct_cast", wasmvm.I32(1), wasmvm.I32(1))
+	expectI32Result(t, inst, "array_fails_struct_cast", 0, wasmvm.I32(0))
+	expectI32Result(t, inst, "array_fails_struct_cast", 1, wasmvm.I32(1))
 }
 
 // TestGCStructNewAndGet checks struct allocation and field reads.
@@ -269,10 +269,10 @@ func TestGCStructNewAndGet(t *testing.T) {
 		t.Fatalf("Instantiate failed: %v", err)
 	}
 
-	expectI32Result(t, inst, "get_i32", wasmvm.I32(42))
-	expectI32Result(t, inst, "get_i8_u", wasmvm.I32(255))
-	expectI32Result(t, inst, "get_i16_s", wasmvm.I32(-32767))
-	expectI32Result(t, inst, "default_i32", wasmvm.I32(0))
+	expectI32Result(t, inst, "get_i32", 42)
+	expectI32Result(t, inst, "get_i8_u", 255)
+	expectI32Result(t, inst, "get_i16_s", -32767)
+	expectI32Result(t, inst, "default_i32", 0)
 }
 
 // TestGCArrayNewLenAndGet checks array allocation, length, and element reads.
@@ -310,8 +310,8 @@ func TestGCArrayNewLenAndGet(t *testing.T) {
 		t.Fatalf("Instantiate failed: %v", err)
 	}
 
-	expectI32Result(t, inst, "len", wasmvm.I32(3))
-	expectI32Result(t, inst, "get_i8_u", wasmvm.I32(255))
-	expectI32Result(t, inst, "get_i16_s", wasmvm.I32(-32767))
-	expectI32Result(t, inst, "default_i8", wasmvm.I32(0))
+	expectI32Result(t, inst, "len", 3)
+	expectI32Result(t, inst, "get_i8_u", 255)
+	expectI32Result(t, inst, "get_i16_s", -32767)
+	expectI32Result(t, inst, "default_i8", 0)
 }

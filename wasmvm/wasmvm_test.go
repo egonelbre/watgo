@@ -33,14 +33,21 @@ func callExport(t *testing.T, inst *wasmvm.ModuleInstance, name string, args ...
 	return results
 }
 
-// expectI32Result calls an exported function and checks for one i32 result.
-func expectI32Result(t *testing.T, inst *wasmvm.ModuleInstance, name string, want wasmvm.Value, args ...wasmvm.Value) {
+// expectValueResult calls an exported function and checks for one result value.
+func expectValueResult(t *testing.T, inst *wasmvm.ModuleInstance, name string, want wasmvm.Value, args ...wasmvm.Value) {
 	t.Helper()
 
 	results := callExport(t, inst, name, args...)
 	if len(results) != 1 || results[0] != want {
 		t.Fatalf("%s got results %#v, want %#v", name, results, want)
 	}
+}
+
+// expectI32Result calls an exported function and checks for one i32 result.
+func expectI32Result(t *testing.T, inst *wasmvm.ModuleInstance, name string, want int32, args ...wasmvm.Value) {
+	t.Helper()
+
+	expectValueResult(t, inst, name, wasmvm.I32(want), args...)
 }
 
 func TestExportedAdd(t *testing.T) {
@@ -56,7 +63,7 @@ func TestExportedAdd(t *testing.T) {
 		t.Fatalf("Instantiate failed: %v", err)
 	}
 
-	expectI32Result(t, inst, "add", wasmvm.I32(7), wasmvm.I32(3), wasmvm.I32(4))
+	expectI32Result(t, inst, "add", 7, wasmvm.I32(3), wasmvm.I32(4))
 }
 
 // TestNop checks that nop executes without changing the operand stack or
@@ -77,7 +84,7 @@ func TestNop(t *testing.T) {
 		t.Fatalf("Instantiate failed: %v", err)
 	}
 
-	expectI32Result(t, inst, "run", wasmvm.I32(42))
+	expectI32Result(t, inst, "run", 42)
 }
 
 func TestHostFunctionImport(t *testing.T) {
@@ -103,7 +110,7 @@ func TestHostFunctionImport(t *testing.T) {
 		t.Fatalf("Instantiate failed: %v", err)
 	}
 
-	expectI32Result(t, inst, "call_inc", wasmvm.I32(42), wasmvm.I32(41))
+	expectI32Result(t, inst, "call_inc", 42, wasmvm.I32(41))
 }
 
 // TestReturnCall checks that return_call invokes a module-defined function and
@@ -126,7 +133,7 @@ func TestReturnCall(t *testing.T) {
 		t.Fatalf("Instantiate failed: %v", err)
 	}
 
-	expectI32Result(t, inst, "tail_add", wasmvm.I32(42), wasmvm.I32(20), wasmvm.I32(22))
+	expectI32Result(t, inst, "tail_add", 42, wasmvm.I32(20), wasmvm.I32(22))
 }
 
 // TestReturnCallHostFunction checks that return_call can tail-call an imported
@@ -155,7 +162,7 @@ func TestReturnCallHostFunction(t *testing.T) {
 		t.Fatalf("Instantiate failed: %v", err)
 	}
 
-	expectI32Result(t, inst, "tail_double", wasmvm.I32(42), wasmvm.I32(21))
+	expectI32Result(t, inst, "tail_double", 42, wasmvm.I32(21))
 }
 
 // TestReturnCallDoesNotGrowCallDepth checks that recursive return_call reuses
@@ -183,10 +190,7 @@ func TestReturnCallDoesNotGrowCallDepth(t *testing.T) {
 		t.Fatalf("Instantiate failed: %v", err)
 	}
 
-	results := callExport(t, inst, "count", wasmvm.I64(20000))
-	if len(results) != 1 || results[0] != wasmvm.I64(0) {
-		t.Fatalf("count got results %#v, want i64 0", results)
-	}
+	expectValueResult(t, inst, "count", wasmvm.I64(0), wasmvm.I64(20000))
 }
 
 // TestReferenceInstructions checks the minimal reference instruction set:
@@ -218,9 +222,9 @@ func TestReferenceInstructions(t *testing.T) {
 		t.Fatalf("Instantiate failed: %v", err)
 	}
 
-	expectI32Result(t, inst, "null_is_null", wasmvm.I32(1))
-	expectI32Result(t, inst, "func_is_null", wasmvm.I32(0))
-	expectI32Result(t, inst, "local_func_is_null", wasmvm.I32(0))
+	expectI32Result(t, inst, "null_is_null", 1)
+	expectI32Result(t, inst, "func_is_null", 0)
+	expectI32Result(t, inst, "local_func_is_null", 0)
 
 	results := callExport(t, inst, "return_null")
 	if len(results) != 1 || !results[0].Type.IsRef() {
@@ -271,13 +275,13 @@ func TestReferenceTableAndGlobalOps(t *testing.T) {
 		t.Fatalf("Instantiate failed: %v", err)
 	}
 
-	expectI32Result(t, inst, "ref_is_null_func", wasmvm.I32(1))
+	expectI32Result(t, inst, "ref_is_null_func", 1)
 	results := callExport(t, inst, "ref_func")
 	if len(results) != 1 || !results[0].Type.IsRef() || results[0].Ref.FuncIndex != 2 {
 		t.Fatalf("ref_func got results %#v, want function reference 2", results)
 	}
 	callExport(t, inst, "table_set")
-	expectI32Result(t, inst, "table_get", wasmvm.I32(0))
+	expectI32Result(t, inst, "table_get", 0)
 	results = callExport(t, inst, "global_set")
 	if len(results) != 1 || !results[0].Type.IsRef() || results[0].Ref.FuncIndex != 2 {
 		t.Fatalf("global_set got results %#v, want function reference 2", results)
@@ -310,11 +314,11 @@ func TestTableBasics(t *testing.T) {
 		t.Fatalf("Instantiate failed: %v", err)
 	}
 
-	expectI32Result(t, inst, "size", wasmvm.I32(3))
-	expectI32Result(t, inst, "is_null", wasmvm.I32(1), wasmvm.I32(0))
-	expectI32Result(t, inst, "is_null", wasmvm.I32(0), wasmvm.I32(1))
+	expectI32Result(t, inst, "size", 3)
+	expectI32Result(t, inst, "is_null", 1, wasmvm.I32(0))
+	expectI32Result(t, inst, "is_null", 0, wasmvm.I32(1))
 	callExport(t, inst, "set_b", wasmvm.I32(2))
-	expectI32Result(t, inst, "is_null", wasmvm.I32(0), wasmvm.I32(2))
+	expectI32Result(t, inst, "is_null", 0, wasmvm.I32(2))
 }
 
 // TestSharedTableImportExport checks the public table import/export API and
@@ -358,7 +362,7 @@ func TestSharedTableImportExport(t *testing.T) {
 	}
 	_ = writer
 
-	expectI32Result(t, owner, "call-1", wasmvm.I32(42))
+	expectI32Result(t, owner, "call-1", 42)
 }
 
 // TestActiveElementSegmentsApplyBeforeDataSegments checks that active element
@@ -403,7 +407,7 @@ func TestActiveElementSegmentsApplyBeforeDataSegments(t *testing.T) {
 		t.Fatal("Instantiate side-effecting module succeeded unexpectedly")
 	}
 
-	expectI32Result(t, owner, "call", wasmvm.I32(0), wasmvm.I32(7))
+	expectI32Result(t, owner, "call", 0, wasmvm.I32(7))
 }
 
 // TestTableGrowFillCopy checks table.grow failure/success behavior and the
@@ -446,16 +450,16 @@ func TestTableGrowFillCopy(t *testing.T) {
 		t.Fatalf("Instantiate failed: %v", err)
 	}
 
-	expectI32Result(t, inst, "size", wasmvm.I32(2))
-	expectI32Result(t, inst, "grow", wasmvm.I32(2), wasmvm.I32(2))
-	expectI32Result(t, inst, "size", wasmvm.I32(4))
-	expectI32Result(t, inst, "grow", wasmvm.I32(-1), wasmvm.I32(2))
+	expectI32Result(t, inst, "size", 2)
+	expectI32Result(t, inst, "grow", 2, wasmvm.I32(2))
+	expectI32Result(t, inst, "size", 4)
+	expectI32Result(t, inst, "grow", -1, wasmvm.I32(2))
 
 	callExport(t, inst, "fill_null", wasmvm.I32(2), wasmvm.I32(2))
-	expectI32Result(t, inst, "is_null", wasmvm.I32(1), wasmvm.I32(2))
+	expectI32Result(t, inst, "is_null", 1, wasmvm.I32(2))
 	callExport(t, inst, "fill_b", wasmvm.I32(0), wasmvm.I32(2))
 	callExport(t, inst, "copy", wasmvm.I32(2), wasmvm.I32(0), wasmvm.I32(2))
-	expectI32Result(t, inst, "is_null", wasmvm.I32(0), wasmvm.I32(3))
+	expectI32Result(t, inst, "is_null", 0, wasmvm.I32(3))
 }
 
 // TestTable64Ops checks that i64-indexed tables use i64 operands and results
@@ -505,23 +509,17 @@ func TestTable64Ops(t *testing.T) {
 		t.Fatalf("Instantiate failed: %v", err)
 	}
 
-	results := callExport(t, inst, "size")
-	if len(results) != 1 || results[0] != wasmvm.I64(3) {
-		t.Fatalf("size got results %#v, want i64 3", results)
-	}
-	expectI32Result(t, inst, "call", wasmvm.I32(42), wasmvm.I64(0))
+	expectValueResult(t, inst, "size", wasmvm.I64(3))
+	expectI32Result(t, inst, "call", 42, wasmvm.I64(0))
 	callExport(t, inst, "set_b", wasmvm.I64(1))
-	expectI32Result(t, inst, "call", wasmvm.I32(7), wasmvm.I64(1))
-	results = callExport(t, inst, "grow")
-	if len(results) != 1 || results[0] != wasmvm.I64(3) {
-		t.Fatalf("grow got results %#v, want old size i64 3", results)
-	}
+	expectI32Result(t, inst, "call", 7, wasmvm.I64(1))
+	expectValueResult(t, inst, "grow", wasmvm.I64(3))
 	callExport(t, inst, "fill_b", wasmvm.I64(2), wasmvm.I64(2))
-	expectI32Result(t, inst, "call", wasmvm.I32(7), wasmvm.I64(3))
+	expectI32Result(t, inst, "call", 7, wasmvm.I64(3))
 	callExport(t, inst, "init_b", wasmvm.I64(4))
-	expectI32Result(t, inst, "call", wasmvm.I32(7), wasmvm.I64(4))
+	expectI32Result(t, inst, "call", 7, wasmvm.I64(4))
 	callExport(t, inst, "copy", wasmvm.I64(5), wasmvm.I64(0), wasmvm.I64(1))
-	expectI32Result(t, inst, "call", wasmvm.I32(42), wasmvm.I64(5))
+	expectI32Result(t, inst, "call", 42, wasmvm.I64(5))
 }
 
 // TestTableGrowPastI32AddressSpaceFails checks that a grow which would make an
@@ -545,8 +543,8 @@ func TestTableGrowPastI32AddressSpaceFails(t *testing.T) {
 		t.Fatalf("Instantiate failed: %v", err)
 	}
 
-	expectI32Result(t, inst, "grow", wasmvm.I32(-1))
-	expectI32Result(t, inst, "size", wasmvm.I32(16))
+	expectI32Result(t, inst, "grow", -1)
+	expectI32Result(t, inst, "size", 16)
 }
 
 // TestPassiveElementSegments checks that table.init can copy from a passive

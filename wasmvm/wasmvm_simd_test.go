@@ -20,16 +20,13 @@ func TestV128Const(t *testing.T) {
 		t.Fatalf("Instantiate failed: %v", err)
 	}
 
-	results := callExport(t, inst, "const")
 	want := [16]byte{
 		0x44, 0x33, 0x22, 0x11,
 		0x88, 0x77, 0x66, 0x55,
 		0xcc, 0xbb, 0xaa, 0x99,
 		0x00, 0xff, 0xee, 0xdd,
 	}
-	if len(results) != 1 || results[0].Type != wasmir.ValueTypeV128 || results[0].V128 != want {
-		t.Fatalf("const got results %#v, want v128 %#v", results, want)
-	}
+	expectValueResult(t, inst, "const", wasmvm.Value{Type: wasmir.ValueTypeV128, V128: want})
 }
 
 // TestV128GlobalConst checks that v128.const can initialize a global and that
@@ -209,17 +206,14 @@ func TestV128MemoryOps(t *testing.T) {
 		0x44, 0x33, 0x22, 0x11, 0x88, 0x77, 0x66, 0x55,
 		0xcc, 0xbb, 0xaa, 0x99, 0x00, 0xff, 0xee, 0xdd,
 	})
-	expectI32Result(t, inst, "store16_lane", wasmvm.I32(0x1122))
+	expectI32Result(t, inst, "store16_lane", 0x1122)
 }
 
 // checkV128Export calls name and verifies that it returns the expected v128.
 func checkV128Export(t *testing.T, inst *wasmvm.ModuleInstance, name string, want [16]byte) {
 	t.Helper()
 
-	results := callExport(t, inst, name)
-	if len(results) != 1 || results[0].Type != wasmir.ValueTypeV128 || results[0].V128 != want {
-		t.Fatalf("%s got results %#v, want v128 %#v", name, results, want)
-	}
+	expectValueResult(t, inst, name, wasmvm.Value{Type: wasmir.ValueTypeV128, V128: want})
 }
 
 // TestV128LaneOps checks SIMD lane extract, replace, and shuffle instructions.
@@ -298,10 +292,7 @@ func TestV128LaneOps(t *testing.T) {
 		{"f64_extract", wasmvm.F64(4.5)},
 	}
 	for _, check := range scalarChecks {
-		results := callExport(t, inst, check.name)
-		if len(results) != 1 || results[0] != check.want {
-			t.Fatalf("%s got results %#v, want %#v", check.name, results, check.want)
-		}
+		expectValueResult(t, inst, check.name, check.want)
 	}
 
 	checkV128Export(t, inst, "i8_replace", v128I32x4(0x00000001, 0x0000000f, 0x000000e5, 0x0000017f))
