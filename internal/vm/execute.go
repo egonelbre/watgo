@@ -1330,6 +1330,10 @@ func (e *executor) run() ([]Value, error) {
 			if err := e.arraySet(ins.index); err != nil {
 				return nil, e.instructionError(err)
 			}
+		case wasmir.InstrArrayFill:
+			if err := e.arrayFill(ins.index); err != nil {
+				return nil, e.instructionError(err)
+			}
 		case wasmir.InstrExternConvertAny:
 			v, err := e.pop()
 			if err != nil {
@@ -2425,7 +2429,7 @@ func (e *executor) arrayGet(kind wasmir.InstrKind, typeIndex uint32) (Value, err
 		return Value{}, fmt.Errorf("array type mismatch")
 	}
 	if uint32(index) >= uint32(len(obj.elems)) {
-		return Value{}, fmt.Errorf("array index out of bounds")
+		return Value{}, fmt.Errorf("out of bounds array access")
 	}
 	return extendPackedField(kind, td.ElemField, obj.elems[uint32(index)])
 }
@@ -2469,9 +2473,64 @@ func (e *executor) arraySet(typeIndex uint32) error {
 		return fmt.Errorf("array type mismatch")
 	}
 	if uint32(index) >= uint32(len(obj.elems)) {
-		return fmt.Errorf("array index out of bounds")
+		return fmt.Errorf("out of bounds array access")
 	}
 	obj.elems[uint32(index)] = normalizeFieldValue(td.ElemField, value)
+	return nil
+}
+
+// arrayFill writes a normalized element value into a mutable array range.
+func (e *executor) arrayFill(typeIndex uint32) error {
+	if e.inst == nil {
+		return fmt.Errorf("instance is nil")
+	}
+	td, err := e.typeDef(typeIndex, wasmir.TypeDefKindArray)
+	if err != nil {
+		return err
+	}
+	if !td.ElemField.Mutable {
+		return fmt.Errorf("array element is immutable")
+	}
+	length, err := e.popI32()
+	if err != nil {
+		return err
+	}
+	value, err := e.popWant(fieldValueType(td.ElemField))
+	if err != nil {
+		return err
+	}
+	start, err := e.popI32()
+	if err != nil {
+		return err
+	}
+	ref, err := e.pop()
+	if err != nil {
+		return err
+	}
+	if !ref.Type.IsRef() || ref.Ref.Kind == RefKindNull {
+		return fmt.Errorf("null array reference")
+	}
+	if ref.Ref.Kind != RefKindArray {
+		return fmt.Errorf("expected array reference")
+	}
+	obj, err := e.inst.objectFromRef(ref.Ref)
+	if err != nil {
+		return err
+	}
+	if !e.objectMatchesType(obj, wasmir.TypeDefKindArray, typeIndex) {
+		return fmt.Errorf("array type mismatch")
+	}
+	startU := uint64(uint32(start))
+	lengthU := uint64(uint32(length))
+	if startU > uint64(len(obj.elems)) || lengthU > uint64(len(obj.elems))-startU {
+		return fmt.Errorf("out of bounds array access")
+	}
+	startN := int(startU)
+	endN := startN + int(lengthU)
+	value = normalizeFieldValue(td.ElemField, value)
+	for i := startN; i < endN; i++ {
+		obj.elems[i] = value
+	}
 	return nil
 }
 

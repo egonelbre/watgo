@@ -217,7 +217,7 @@ func compileFunction(m *wasmir.Module, fn *wasmir.Function) (*function, error) {
 			op.index = ins.TypeIndex
 			op.bits = int64(ins.FieldIndex)
 		case wasmir.InstrArrayGet, wasmir.InstrArrayGetS, wasmir.InstrArrayGetU,
-			wasmir.InstrArraySet:
+			wasmir.InstrArraySet, wasmir.InstrArrayFill:
 			op.index = ins.TypeIndex
 		case wasmir.InstrGlobalGet, wasmir.InstrGlobalSet:
 			op.index = ins.GlobalIndex

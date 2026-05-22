@@ -389,6 +389,45 @@ func TestGCArrayNewFixedAndSet(t *testing.T) {
 	expectI32Result(t, inst, "set", -32767)
 }
 
+// TestGCArrayFill checks that array.fill mutates a range and normalizes packed
+// values before storing them.
+func TestGCArrayFill(t *testing.T) {
+	rt := wasmvm.NewRuntime()
+	inst, err := rt.Instantiate(parseWAT(t, `
+		(module
+			(type $a (array (mut i8)))
+
+			(global $g (mut (ref $a)) (array.new_default $a (i32.const 5)))
+
+			(func (export "fill")
+				global.get $g
+				i32.const 1
+				i32.const -1
+				i32.const 3
+				array.fill $a)
+			(func (export "get") (param i32) (result i32)
+				global.get $g
+				local.get 0
+				array.get_u $a)
+			(func (export "fill_empty_at_end")
+				global.get $g
+				i32.const 5
+				i32.const 7
+				i32.const 0
+				array.fill $a))
+	`), nil)
+	if err != nil {
+		t.Fatalf("Instantiate failed: %v", err)
+	}
+
+	callExport(t, inst, "fill")
+	expectI32Result(t, inst, "get", 0, wasmvm.I32(0))
+	expectI32Result(t, inst, "get", 255, wasmvm.I32(1))
+	expectI32Result(t, inst, "get", 255, wasmvm.I32(3))
+	expectI32Result(t, inst, "get", 0, wasmvm.I32(4))
+	callExport(t, inst, "fill_empty_at_end")
+}
+
 // TestGCConstExprAggregateNew checks that struct and array allocations can be
 // used in module-level constant expressions such as global initializers.
 func TestGCConstExprAggregateNew(t *testing.T) {

@@ -28,7 +28,6 @@ var wasmSpecWasmvmScriptsFlag = flag.String(
 var wasmSpecWasmvmDeniedScripts = []string{
 	"scripts/gc/array.wast",
 	"scripts/gc/array_copy.wast",
-	"scripts/gc/array_fill.wast",
 	"scripts/gc/array_init_data.wast",
 	"scripts/gc/array_init_elem.wast",
 	"scripts/gc/array_new_data.wast",
