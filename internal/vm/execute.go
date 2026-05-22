@@ -154,7 +154,8 @@ type Reference struct {
 
 	// ExternID is set when Kind is RefKindExtern. The VM treats this as an
 	// opaque identity token and never interprets it.
-	ExternID uint64
+	ExternID    uint64
+	externValue *Value
 
 	// ExnID is set when Kind is RefKindExn. It indexes the owning instance's
 	// exception-reference table.
@@ -1364,20 +1365,20 @@ func (e *executor) run() ([]Value, error) {
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
-			if !v.Type.IsRef() {
-				return nil, e.instructionError(fmt.Errorf("extern.convert_any got %s operand", v.Type))
+			v, err = externConvertAny(v)
+			if err != nil {
+				return nil, e.instructionError(err)
 			}
-			v.Type = wasmir.RefTypeExtern(v.Type.Nullable)
 			e.push(v)
 		case wasmir.InstrAnyConvertExtern:
 			v, err := e.pop()
 			if err != nil {
 				return nil, e.instructionError(err)
 			}
-			if !v.Type.IsRef() {
-				return nil, e.instructionError(fmt.Errorf("any.convert_extern got %s operand", v.Type))
+			v, err = anyConvertExtern(v)
+			if err != nil {
+				return nil, e.instructionError(err)
 			}
-			v.Type = wasmir.RefTypeAny(v.Type.Nullable)
 			e.push(v)
 		case wasmir.InstrCall:
 			results, err := e.callFunction(ins.index)
@@ -1625,6 +1626,42 @@ func zeroValue(vt wasmir.ValueType) (Value, error) {
 		}
 		return Value{}, fmt.Errorf("unsupported local type %s", vt)
 	}
+}
+
+// externConvertAny implements extern.convert_any for a runtime reference.
+func externConvertAny(v Value) (Value, error) {
+	if !v.Type.IsRef() {
+		return Value{}, fmt.Errorf("extern.convert_any got %s operand", v.Type)
+	}
+	if v.Ref.Kind == RefKindNull {
+		v.Type = wasmir.RefTypeExtern(v.Type.Nullable)
+		return v, nil
+	}
+	if v.Ref.Kind == RefKindExtern {
+		v.Type = wasmir.RefTypeExtern(v.Type.Nullable)
+		return v, nil
+	}
+	inner := v
+	return Value{
+		Type: wasmir.RefTypeExtern(v.Type.Nullable),
+		Ref:  Reference{Kind: RefKindExtern, externValue: &inner},
+	}, nil
+}
+
+// anyConvertExtern implements any.convert_extern for a runtime reference.
+func anyConvertExtern(v Value) (Value, error) {
+	if !v.Type.IsRef() {
+		return Value{}, fmt.Errorf("any.convert_extern got %s operand", v.Type)
+	}
+	if v.Ref.Kind == RefKindNull {
+		v.Type = wasmir.RefTypeAny(v.Type.Nullable)
+		return v, nil
+	}
+	if v.Ref.Kind == RefKindExtern && v.Ref.externValue != nil {
+		return *v.Ref.externValue, nil
+	}
+	v.Type = wasmir.RefTypeAny(v.Type.Nullable)
+	return v, nil
 }
 
 // instructionError wraps err with the current program counter and opcode.
@@ -2013,7 +2050,7 @@ func (e *executor) checkFunctionReferenceType(ref Reference, callTypeIndex uint3
 	if err != nil {
 		return err
 	}
-	if !typeequiv.Types(inst.m, gotTypeIndex, e.inst.m, callTypeIndex) {
+	if !typeequiv.TypeSubtype(inst.m, gotTypeIndex, e.inst.m, callTypeIndex) {
 		return fmt.Errorf("indirect call type mismatch")
 	}
 	return nil
@@ -2151,7 +2188,7 @@ func (e *executor) refMatchesTypeIndex(ref Reference, targetType uint32) bool {
 			inst = e.inst
 		}
 		got, err := inst.FuncTypeIndex(ref.FuncIndex)
-		return err == nil && typeequiv.Types(inst.m, got, e.inst.m, targetType)
+		return err == nil && typeequiv.TypeSubtype(inst.m, got, e.inst.m, targetType)
 	case RefKindStruct, RefKindArray:
 		obj, err := e.inst.objectFromRef(ref)
 		if err != nil {
@@ -2185,7 +2222,7 @@ func refInEqHierarchy(ref Reference) bool {
 
 // isRuntimeTypeIndexSubtype checks nominal subtype reachability for one module.
 func isRuntimeTypeIndexSubtype(m *wasmir.Module, got uint32, want uint32) bool {
-	if got == want || typeequiv.Types(m, got, m, want) {
+	if typeequiv.TypeSubtype(m, got, m, want) {
 		return true
 	}
 	if m == nil || int(got) >= len(m.Types) || int(want) >= len(m.Types) {
@@ -2201,7 +2238,7 @@ func isRuntimeTypeIndexSubtype(m *wasmir.Module, got uint32, want uint32) bool {
 		}
 		seen[idx] = true
 		for _, super := range m.Types[idx].SuperTypes {
-			if super == want || typeequiv.Types(m, super, m, want) {
+			if typeequiv.TypeSubtype(m, super, m, want) {
 				return true
 			}
 			stack = append(stack, super)
@@ -2762,7 +2799,7 @@ func (e *executor) objectMatchesType(obj *gcObject, kind wasmir.TypeDefKind, tar
 	if owner == e.inst {
 		return isRuntimeTypeIndexSubtype(e.inst.m, obj.typeIndex, targetType)
 	}
-	return typeequiv.Types(owner.m, obj.typeIndex, e.inst.m, targetType)
+	return typeequiv.TypeSubtype(owner.m, obj.typeIndex, e.inst.m, targetType)
 }
 
 // typeDefKind returns the wasmir type definition kind represented by kind.

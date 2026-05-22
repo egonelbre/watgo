@@ -898,6 +898,26 @@ func (inst *Instance) evalConstExpr(init []wasmir.Instruction, constExpr bool) (
 				return Value{}, fmt.Errorf("initializer instruction %d: %w", pc, err)
 			}
 			stack = append(stack, v)
+		case wasmir.InstrExternConvertAny:
+			v, err := popConst(&stack)
+			if err != nil {
+				return Value{}, fmt.Errorf("initializer instruction %d: %w", pc, err)
+			}
+			v, err = externConvertAny(v)
+			if err != nil {
+				return Value{}, fmt.Errorf("initializer instruction %d: %w", pc, err)
+			}
+			stack = append(stack, v)
+		case wasmir.InstrAnyConvertExtern:
+			v, err := popConst(&stack)
+			if err != nil {
+				return Value{}, fmt.Errorf("initializer instruction %d: %w", pc, err)
+			}
+			v, err = anyConvertExtern(v)
+			if err != nil {
+				return Value{}, fmt.Errorf("initializer instruction %d: %w", pc, err)
+			}
+			stack = append(stack, v)
 		case wasmir.InstrGlobalGet:
 			if inst == nil {
 				return Value{}, fmt.Errorf("initializer instruction %d: instance is nil", pc)
@@ -1154,14 +1174,23 @@ func popConstArgs(stack *[]Value, params []wasmir.ValueType) ([]Value, error) {
 	return args, nil
 }
 
-// popConstValue pops the top const-expression stack value and verifies its
-// value type.
-func popConstValue(stack *[]Value, want wasmir.ValueType) (Value, error) {
+// popConst pops the top const-expression stack value.
+func popConst(stack *[]Value) (Value, error) {
 	if len(*stack) == 0 {
 		return Value{}, fmt.Errorf("initializer stack underflow")
 	}
 	v := (*stack)[len(*stack)-1]
 	*stack = (*stack)[:len(*stack)-1]
+	return v, nil
+}
+
+// popConstValue pops the top const-expression stack value and verifies its
+// value type.
+func popConstValue(stack *[]Value, want wasmir.ValueType) (Value, error) {
+	v, err := popConst(stack)
+	if err != nil {
+		return Value{}, err
+	}
 	if v.Type != want {
 		return Value{}, fmt.Errorf("initializer got %s, want %s", v.Type, want)
 	}

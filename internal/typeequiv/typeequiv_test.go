@@ -53,6 +53,33 @@ func TestTypesCrossModuleIndexedRefs(t *testing.T) {
 	}
 }
 
+// TestTypeSubtypeChecksDeclaredSupertypes checks same-module and cross-module
+// subtype matching through declared supertype edges.
+func TestTypeSubtypeChecksDeclaredSupertypes(t *testing.T) {
+	a := moduleWithTypes(
+		funcType(nil, []wasmir.ValueType{wasmir.RefTypeFunc(true)}),
+		subFuncType(0, nil, []wasmir.ValueType{wasmir.RefTypeIndexed(0, true)}),
+	)
+	b := moduleWithTypes(
+		funcType(nil, []wasmir.ValueType{wasmir.RefTypeFunc(true)}),
+		subFuncType(0, nil, []wasmir.ValueType{wasmir.RefTypeIndexed(0, true)}),
+		funcType([]wasmir.ValueType{wasmir.ValueTypeI32}, nil),
+	)
+
+	if !TypeSubtype(a, 1, a, 0) {
+		t.Fatal("same-module declared subtype was not accepted")
+	}
+	if !TypeSubtype(a, 1, b, 0) {
+		t.Fatal("cross-module declared subtype with equivalent supertype was not accepted")
+	}
+	if TypeSubtype(a, 0, a, 1) {
+		t.Fatal("supertype was accepted as subtype")
+	}
+	if TypeSubtype(a, 1, b, 2) {
+		t.Fatal("unrelated type was accepted as supertype")
+	}
+}
+
 // TestTypesRecursiveGroupEquivalence checks recursive groups that refer to
 // peers by relative position.
 func TestTypesRecursiveGroupEquivalence(t *testing.T) {
@@ -148,6 +175,14 @@ func funcType(params []wasmir.ValueType, results []wasmir.ValueType) wasmir.Type
 		Params:  params,
 		Results: results,
 	}
+}
+
+// subFuncType builds a function subtype with one declared supertype.
+func subFuncType(super uint32, params []wasmir.ValueType, results []wasmir.ValueType) wasmir.TypeDef {
+	td := funcType(params, results)
+	td.SubType = true
+	td.SuperTypes = []uint32{super}
+	return td
 }
 
 // recFuncType builds the first function type definition in a recursive group.

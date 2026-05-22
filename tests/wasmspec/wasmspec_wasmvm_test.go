@@ -25,12 +25,7 @@ var wasmSpecWasmvmScriptsFlag = flag.String(
 
 // wasmSpecWasmvmDeniedScripts lists spec scripts not currently run through the
 // wasmvm backend. Entries ending in "/" deny an entire directory subtree.
-var wasmSpecWasmvmDeniedScripts = []string{
-	"scripts/gc/extern.wast",
-	"scripts/gc/type-subtyping.wast",
-
-	"scripts/bulk-memory/table_init.wast", // gc-related
-}
+var wasmSpecWasmvmDeniedScripts = []string{}
 
 type wasmSpecWasmvmRunner struct {
 	rt                 *wasmvm.Runtime
@@ -920,6 +915,10 @@ func scriptValueToWasmvmValue(arg scriptValue, targetType wasmir.ValueType) (was
 		value := wasmvm.ExternRef(arg.bits)
 		value.Type = targetType
 		return value, nil
+	case valueRefHost:
+		value := wasmvm.ExternRef(arg.bits)
+		value.Type = targetType
+		return value, nil
 	default:
 		return wasmvm.Value{}, fmt.Errorf("unsupported invoke arg kind %q", arg.kind)
 	}
@@ -957,8 +956,11 @@ func wasmvmValueToRuntimeValue(value wasmvm.Value) (runtimeValue, error) {
 		if value.Ref.Kind == 0 {
 			return runtimeValue{}, nil
 		}
-		if value.Ref.Kind == wasmvm.RefKindExtern {
+		if value.Ref.Kind == wasmvm.RefKindExtern && value.Type.HeapType.Kind == wasmir.HeapKindExtern {
 			return runtimeValue{scalar: encodedRefExternTag | value.Ref.ExternID}, nil
+		}
+		if value.Ref.Kind == wasmvm.RefKindExtern {
+			return runtimeValue{scalar: encodedRefHostTag | value.Ref.ExternID}, nil
 		}
 		switch value.Ref.Kind {
 		case wasmvm.RefKindI31:

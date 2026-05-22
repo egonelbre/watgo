@@ -148,6 +148,113 @@ func TestGCRefCast(t *testing.T) {
 	}
 }
 
+// TestGCExternConversions checks the extern/any conversions added by the GC
+// proposal. Host externrefs should round-trip through anyref, and internal GC
+// refs should be boxed as externrefs and recovered by any.convert_extern.
+func TestGCExternConversions(t *testing.T) {
+	rt := wasmvm.NewRuntime()
+	inst, err := rt.Instantiate(parseWAT(t, `
+		(module
+			(type $s (struct (field i32)))
+			(global $null_extern externref
+				(extern.convert_any (ref.null any)))
+			(global $null_any anyref
+				(any.convert_extern (ref.null extern)))
+
+			(func (export "host_extern_roundtrip") (param externref) (result externref)
+				local.get 0
+				any.convert_extern
+				extern.convert_any)
+			(func (export "struct_roundtrip") (result i32)
+				i32.const 42
+				struct.new $s
+				extern.convert_any
+				any.convert_extern
+				ref.cast (ref $s)
+				struct.get $s 0)
+			(func (export "global_null_extern_is_null") (result i32)
+				global.get $null_extern
+				ref.is_null)
+			(func (export "global_null_any_is_null") (result i32)
+				global.get $null_any
+				ref.is_null))
+	`), nil)
+	if err != nil {
+		t.Fatalf("Instantiate failed: %v", err)
+	}
+
+	hostRef := wasmvm.ExternRef(17)
+	expectValueResult(t, inst, "host_extern_roundtrip", hostRef, hostRef)
+	expectI32Result(t, inst, "struct_roundtrip", 42)
+	expectI32Result(t, inst, "global_null_extern_is_null", 1)
+	expectI32Result(t, inst, "global_null_any_is_null", 1)
+}
+
+// TestGCFunctionSubtyping checks that declared function subtypes are accepted
+// by call_ref, call_indirect, and wasm-to-wasm function import linking.
+func TestGCFunctionSubtyping(t *testing.T) {
+	rt := wasmvm.NewRuntime()
+	inst, err := rt.Instantiate(parseWAT(t, `
+		(module
+			(type $super (sub (func (result i32))))
+			(type $sub (sub $super (func (result i32))))
+			(table 1 funcref)
+			(elem (i32.const 0) func $forty_two)
+			(func $forty_two (type $sub)
+				i32.const 42)
+			(elem declare func $forty_two)
+			(func (export "call_ref_as_super") (result i32)
+				ref.func $forty_two
+				call_ref $super)
+			(func (export "call_indirect_as_super") (result i32)
+				i32.const 0
+				call_indirect (type $super)))
+	`), nil)
+	if err != nil {
+		t.Fatalf("Instantiate failed: %v", err)
+	}
+
+	expectI32Result(t, inst, "call_ref_as_super", 42)
+	expectI32Result(t, inst, "call_indirect_as_super", 42)
+}
+
+// TestGCFunctionSubtypeImport checks subtype matching across module boundaries
+// when a wasm function exported with a subtype satisfies an imported supertype.
+func TestGCFunctionSubtypeImport(t *testing.T) {
+	rt := wasmvm.NewRuntime()
+	provider, err := rt.Instantiate(parseWAT(t, `
+		(module
+			(type $super (sub (func (result i32))))
+			(type $sub (sub $super (func (result i32))))
+			(func (export "answer") (type $sub)
+				i32.const 42))
+	`), nil)
+	if err != nil {
+		t.Fatalf("Instantiate provider failed: %v", err)
+	}
+	answer, ok := provider.ExportedFunc("answer")
+	if !ok {
+		t.Fatal("missing answer export")
+	}
+
+	consumer, err := rt.Instantiate(parseWAT(t, `
+		(module
+			(type $super (sub (func (result i32))))
+			(import "m" "answer" (func $answer (type $super)))
+			(func (export "call") (result i32)
+				call $answer))
+	`), wasmvm.Imports{
+		"m": {
+			"answer": answer,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Instantiate consumer failed: %v", err)
+	}
+
+	expectI32Result(t, consumer, "call", 42)
+}
+
 // TestGCBranchCast checks that br_on_cast branches only when the runtime
 // object kind matches the target type, and that the branch path carries the
 // narrowed reference needed by later GC instructions.

@@ -596,7 +596,7 @@ func checkHostFuncType(m *wasmir.Module, imp wasmir.Import, host HostFunc) error
 		return fmt.Errorf("import %q.%q has invalid function type", imp.Module, imp.Name)
 	}
 	if host.sourceTypeKnown {
-		if !typeequiv.Types(host.sourceModule, host.sourceTypeIndex, m, imp.TypeIdx) {
+		if !typeequiv.TypeSubtype(host.sourceModule, host.sourceTypeIndex, m, imp.TypeIdx) {
 			return fmt.Errorf("import %q.%q type mismatch", imp.Module, imp.Name)
 		}
 	} else if !typeequiv.FuncTypeAndSignature(m, imp.TypeIdx, host.Params, host.Results) {

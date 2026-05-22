@@ -3,7 +3,7 @@ Immediate TODOs
 
 vm:
 
-* 
+* remove deny list?
 
 Longer-term plans
 -----------------

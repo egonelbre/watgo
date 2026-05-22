@@ -22,9 +22,10 @@
 // indices, corresponding entries are equivalent. Entries at different relative
 // positions in the group are not equivalent.
 //
-// This package is intentionally about equivalence, not subtyping. Validation
-// code layers subtype reachability on top of these predicates when the spec
-// calls for matching rather than exact equivalence.
+// Most predicates in this package are intentionally about equivalence rather
+// than subtyping. TypeSubtype is the exception: it layers declared-supertype
+// reachability over structural equivalence for runtime and linking checks that
+// accept subtypes.
 package typeequiv
 
 import "github.com/eliben/watgo/wasmir"
@@ -41,6 +42,47 @@ import "github.com/eliben/watgo/wasmir"
 func Types(moduleA *wasmir.Module, typeA uint32, moduleB *wasmir.Module, typeB uint32) bool {
 	c := newChecker(moduleA, moduleB)
 	return c.typeIndicesEquivalent(typeA, typeB)
+}
+
+// TypeSubtype reports whether sub names a type that is equivalent to, or a
+// declared subtype of, super across the two module type spaces.
+func TypeSubtype(moduleSub *wasmir.Module, sub uint32, moduleSuper *wasmir.Module, super uint32) bool {
+	// WebAssembly subtyping is declared explicitly: a type can list one or more
+	// direct supertypes. To answer a subtype query, this function walks the
+	// transitive closure of those declared supertypes in moduleSub.
+	//
+	// The stack below is a small depth-first worklist of moduleSub type indices
+	// still to inspect.
+	//
+	// seen prevents cycles or repeated work in recursive subtype graphs. Each
+	// visited supertype is compared to moduleSuper.super with Types, because
+	// the target supertype may live in a different module and therefore may
+	// have a different numeric type index even when it is structurally
+	// equivalent.
+	if Types(moduleSub, sub, moduleSuper, super) {
+		return true
+	}
+	if moduleSub == nil || int(sub) >= len(moduleSub.Types) || moduleSuper == nil || int(super) >= len(moduleSuper.Types) {
+		return false
+	}
+
+	seen := map[uint32]bool{}
+	stack := []uint32{sub}
+	for len(stack) > 0 {
+		idx := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if seen[idx] || int(idx) >= len(moduleSub.Types) {
+			continue
+		}
+		seen[idx] = true
+		for _, declaredSuper := range moduleSub.Types[idx].SuperTypes {
+			if Types(moduleSub, declaredSuper, moduleSuper, super) {
+				return true
+			}
+			stack = append(stack, declaredSuper)
+		}
+	}
+	return false
 }
 
 // FuncTypeAndSignature reports whether the function type named by typeIndex in
