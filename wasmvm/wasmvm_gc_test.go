@@ -428,6 +428,82 @@ func TestGCArrayFill(t *testing.T) {
 	callExport(t, inst, "fill_empty_at_end")
 }
 
+// TestGCArrayBulkOperations checks array data/element initialization and
+// overlapping array copies.
+func TestGCArrayBulkOperations(t *testing.T) {
+	rt := wasmvm.NewRuntime()
+	inst, err := rt.Instantiate(parseWAT(t, `
+		(module
+			(type $bytes (array (mut i8)))
+			(type $refs (array (mut i31ref)))
+
+			(data $d "\10\20\30\40")
+			(elem $e i31ref
+				(ref.i31 (i32.const 7))
+				(ref.i31 (i32.const 8))
+				(ref.i31 (i32.const 9)))
+
+			(global $bytes (mut (ref $bytes)) (array.new_default $bytes (i32.const 4)))
+			(global $refs (mut (ref $refs)) (array.new_default $refs (i32.const 3)))
+
+			(func (export "new_data") (result i32)
+				i32.const 1
+				i32.const 2
+				array.new_data $bytes $d
+				i32.const 1
+				array.get_u $bytes)
+			(func (export "init_data") (result i32)
+				global.get $bytes
+				i32.const 1
+				i32.const 2
+				i32.const 2
+				array.init_data $bytes $d
+				global.get $bytes
+				i32.const 2
+				array.get_u $bytes)
+			(func (export "new_elem") (result i32)
+				i32.const 1
+				i32.const 2
+				array.new_elem $refs $e
+				i32.const 0
+				array.get $refs
+				i31.get_u)
+			(func (export "init_elem") (result i32)
+				global.get $refs
+				i32.const 0
+				i32.const 2
+				i32.const 1
+				array.init_elem $refs $e
+				global.get $refs
+				i32.const 0
+				array.get $refs
+				i31.get_u)
+			(func (export "copy_overlap") (result i32)
+				i32.const 0
+				i32.const 4
+				array.new_data $bytes $d
+				global.set $bytes
+				global.get $bytes
+				i32.const 1
+				global.get $bytes
+				i32.const 0
+				i32.const 3
+				array.copy $bytes $bytes
+				global.get $bytes
+				i32.const 3
+				array.get_u $bytes))
+	`), nil)
+	if err != nil {
+		t.Fatalf("Instantiate failed: %v", err)
+	}
+
+	expectI32Result(t, inst, "new_data", 0x30)
+	expectI32Result(t, inst, "init_data", 0x40)
+	expectI32Result(t, inst, "new_elem", 8)
+	expectI32Result(t, inst, "init_elem", 9)
+	expectI32Result(t, inst, "copy_overlap", 0x30)
+}
+
 // TestGCConstExprAggregateNew checks that struct and array allocations can be
 // used in module-level constant expressions such as global initializers.
 func TestGCConstExprAggregateNew(t *testing.T) {

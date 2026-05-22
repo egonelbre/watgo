@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"math/bits"
+	"slices"
 
 	"github.com/eliben/watgo/internal/typeequiv"
 	"github.com/eliben/watgo/wasmir"
@@ -1308,6 +1309,18 @@ func (e *executor) run() ([]Value, error) {
 				return nil, e.instructionError(err)
 			}
 			e.push(v)
+		case wasmir.InstrArrayNewData:
+			v, err := e.newDataArray(ins.index, uint32(ins.bits))
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			e.push(v)
+		case wasmir.InstrArrayNewElem:
+			v, err := e.newElemArray(ins.index, uint32(ins.bits))
+			if err != nil {
+				return nil, e.instructionError(err)
+			}
+			e.push(v)
 		case wasmir.InstrArrayNewFixed:
 			v, err := e.newFixedArray(ins.index, uint32(ins.bits))
 			if err != nil {
@@ -1332,6 +1345,18 @@ func (e *executor) run() ([]Value, error) {
 			}
 		case wasmir.InstrArrayFill:
 			if err := e.arrayFill(ins.index); err != nil {
+				return nil, e.instructionError(err)
+			}
+		case wasmir.InstrArrayInitData:
+			if err := e.arrayInitData(ins.index, uint32(ins.bits)); err != nil {
+				return nil, e.instructionError(err)
+			}
+		case wasmir.InstrArrayInitElem:
+			if err := e.arrayInitElem(ins.index, uint32(ins.bits)); err != nil {
+				return nil, e.instructionError(err)
+			}
+		case wasmir.InstrArrayCopy:
+			if err := e.arrayCopy(ins.index, uint32(ins.bits)); err != nil {
 				return nil, e.instructionError(err)
 			}
 		case wasmir.InstrExternConvertAny:
@@ -2376,6 +2401,53 @@ func (e *executor) newDefaultArray(typeIndex uint32) (Value, error) {
 	return e.inst.newArrayRef(typeIndex, elems)
 }
 
+// newDataArray allocates an array initialized from a data segment.
+func (e *executor) newDataArray(typeIndex uint32, dataIndex uint32) (Value, error) {
+	if e.inst == nil {
+		return Value{}, fmt.Errorf("instance is nil")
+	}
+	td, err := e.typeDef(typeIndex, wasmir.TypeDefKindArray)
+	if err != nil {
+		return Value{}, err
+	}
+	length, err := e.popI32()
+	if err != nil {
+		return Value{}, err
+	}
+	offset, err := e.popI32()
+	if err != nil {
+		return Value{}, err
+	}
+	elems, err := e.arrayValuesFromData(td.ElemField, dataIndex, uint32(offset), uint32(length))
+	if err != nil {
+		return Value{}, err
+	}
+	return e.inst.newArrayRef(typeIndex, elems)
+}
+
+// newElemArray allocates an array initialized from an element segment.
+func (e *executor) newElemArray(typeIndex uint32, elemIndex uint32) (Value, error) {
+	if e.inst == nil {
+		return Value{}, fmt.Errorf("instance is nil")
+	}
+	if _, err := e.typeDef(typeIndex, wasmir.TypeDefKindArray); err != nil {
+		return Value{}, err
+	}
+	length, err := e.popI32()
+	if err != nil {
+		return Value{}, err
+	}
+	offset, err := e.popI32()
+	if err != nil {
+		return Value{}, err
+	}
+	elems, err := e.arrayValuesFromElem(elemIndex, uint32(offset), uint32(length))
+	if err != nil {
+		return Value{}, err
+	}
+	return e.inst.newArrayRef(typeIndex, elems)
+}
+
 // arrayLen returns the length of an array object.
 func (e *executor) arrayLen() (uint32, error) {
 	if e.inst == nil {
@@ -2534,6 +2606,134 @@ func (e *executor) arrayFill(typeIndex uint32) error {
 	return nil
 }
 
+// arrayInitData writes data-segment values into a mutable array range.
+func (e *executor) arrayInitData(typeIndex uint32, dataIndex uint32) error {
+	if e.inst == nil {
+		return fmt.Errorf("instance is nil")
+	}
+	td, err := e.typeDef(typeIndex, wasmir.TypeDefKindArray)
+	if err != nil {
+		return err
+	}
+	if !td.ElemField.Mutable {
+		return fmt.Errorf("array element is immutable")
+	}
+	length, err := e.popI32()
+	if err != nil {
+		return err
+	}
+	src, err := e.popI32()
+	if err != nil {
+		return err
+	}
+	dst, err := e.popI32()
+	if err != nil {
+		return err
+	}
+	ref, err := e.popArrayRef(typeIndex)
+	if err != nil {
+		return err
+	}
+	dstStart, dstEnd, err := arrayRange(len(ref.elems), uint32(dst), uint32(length))
+	if err != nil {
+		return err
+	}
+	values, err := e.arrayValuesFromData(td.ElemField, dataIndex, uint32(src), uint32(length))
+	if err != nil {
+		return err
+	}
+	copy(ref.elems[dstStart:dstEnd], values)
+	return nil
+}
+
+// arrayInitElem writes element-segment references into a mutable array range.
+func (e *executor) arrayInitElem(typeIndex uint32, elemIndex uint32) error {
+	if e.inst == nil {
+		return fmt.Errorf("instance is nil")
+	}
+	td, err := e.typeDef(typeIndex, wasmir.TypeDefKindArray)
+	if err != nil {
+		return err
+	}
+	if !td.ElemField.Mutable {
+		return fmt.Errorf("array element is immutable")
+	}
+	length, err := e.popI32()
+	if err != nil {
+		return err
+	}
+	src, err := e.popI32()
+	if err != nil {
+		return err
+	}
+	dst, err := e.popI32()
+	if err != nil {
+		return err
+	}
+	ref, err := e.popArrayRef(typeIndex)
+	if err != nil {
+		return err
+	}
+	dstStart, dstEnd, err := arrayRange(len(ref.elems), uint32(dst), uint32(length))
+	if err != nil {
+		return err
+	}
+	values, err := e.arrayValuesFromElem(elemIndex, uint32(src), uint32(length))
+	if err != nil {
+		return err
+	}
+	copy(ref.elems[dstStart:dstEnd], values)
+	return nil
+}
+
+// arrayCopy copies values between array ranges, including overlapping ranges
+// in the same array.
+func (e *executor) arrayCopy(dstTypeIndex uint32, srcTypeIndex uint32) error {
+	if e.inst == nil {
+		return fmt.Errorf("instance is nil")
+	}
+	dstType, err := e.typeDef(dstTypeIndex, wasmir.TypeDefKindArray)
+	if err != nil {
+		return err
+	}
+	if !dstType.ElemField.Mutable {
+		return fmt.Errorf("array element is immutable")
+	}
+	if _, err := e.typeDef(srcTypeIndex, wasmir.TypeDefKindArray); err != nil {
+		return err
+	}
+	length, err := e.popI32()
+	if err != nil {
+		return err
+	}
+	srcIndex, err := e.popI32()
+	if err != nil {
+		return err
+	}
+	src, err := e.popArrayRef(srcTypeIndex)
+	if err != nil {
+		return err
+	}
+	dstIndex, err := e.popI32()
+	if err != nil {
+		return err
+	}
+	dst, err := e.popArrayRef(dstTypeIndex)
+	if err != nil {
+		return err
+	}
+	dstStart, dstEnd, err := arrayRange(len(dst.elems), uint32(dstIndex), uint32(length))
+	if err != nil {
+		return err
+	}
+	srcStart, srcEnd, err := arrayRange(len(src.elems), uint32(srcIndex), uint32(length))
+	if err != nil {
+		return err
+	}
+	copy(dst.elems[dstStart:dstEnd], src.elems[srcStart:srcEnd])
+	return nil
+}
+
 // typeDef returns a module type definition with kind checking.
 func (e *executor) typeDef(typeIndex uint32, kind wasmir.TypeDefKind) (wasmir.TypeDef, error) {
 	if e.inst == nil || int(typeIndex) >= len(e.inst.m.Types) {
@@ -2574,6 +2774,136 @@ func (kind gcObjectKind) typeDefKind() wasmir.TypeDefKind {
 		return wasmir.TypeDefKindArray
 	default:
 		return 0
+	}
+}
+
+// popArrayRef pops an array reference matching typeIndex.
+func (e *executor) popArrayRef(typeIndex uint32) (*gcObject, error) {
+	ref, err := e.pop()
+	if err != nil {
+		return nil, err
+	}
+	if !ref.Type.IsRef() || ref.Ref.Kind == RefKindNull {
+		return nil, fmt.Errorf("null array reference")
+	}
+	if ref.Ref.Kind != RefKindArray {
+		return nil, fmt.Errorf("expected array reference")
+	}
+	obj, err := e.inst.objectFromRef(ref.Ref)
+	if err != nil {
+		return nil, err
+	}
+	if !e.objectMatchesType(obj, wasmir.TypeDefKindArray, typeIndex) {
+		return nil, fmt.Errorf("array type mismatch")
+	}
+	return obj, nil
+}
+
+// arrayValuesFromData decodes length array element values from a data segment.
+func (e *executor) arrayValuesFromData(field wasmir.FieldType, dataIndex uint32, offset uint32, length uint32) ([]Value, error) {
+	data, err := e.inst.dataSegment(dataIndex)
+	if err != nil {
+		return nil, err
+	}
+	if data.dropped {
+		if length == 0 {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("out of bounds memory access")
+	}
+	width, err := arrayDataFieldWidth(field)
+	if err != nil {
+		return nil, err
+	}
+	byteLength := uint64(length) * uint64(width)
+	offsetU := uint64(offset)
+	if offsetU > uint64(len(data.init)) || byteLength > uint64(len(data.init))-offsetU {
+		return nil, fmt.Errorf("out of bounds memory access")
+	}
+	start := int(offsetU)
+	values := make([]Value, int(length))
+	for i := range values {
+		elemStart := start + i*int(width)
+		values[i] = valueFromArrayData(field, data.init[elemStart:elemStart+int(width)])
+	}
+	return values, nil
+}
+
+// arrayValuesFromElem copies length values from an element segment.
+func (e *executor) arrayValuesFromElem(elemIndex uint32, offset uint32, length uint32) ([]Value, error) {
+	elem, err := e.inst.elemSegment(elemIndex)
+	if err != nil {
+		return nil, err
+	}
+	if elem.dropped {
+		if length == 0 {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("out of bounds table access")
+	}
+	offsetU := uint64(offset)
+	lengthU := uint64(length)
+	if offsetU > uint64(len(elem.values)) || lengthU > uint64(len(elem.values))-offsetU {
+		return nil, fmt.Errorf("out of bounds table access")
+	}
+	start := int(offsetU)
+	return slices.Clone(elem.values[start : start+int(lengthU)]), nil
+}
+
+// arrayRange returns the in-bounds half-open range for an array operation.
+func arrayRange(arrayLen int, start uint32, length uint32) (int, int, error) {
+	startU := uint64(start)
+	lengthU := uint64(length)
+	if startU > uint64(arrayLen) || lengthU > uint64(arrayLen)-startU {
+		return 0, 0, fmt.Errorf("out of bounds array access")
+	}
+	startN := int(startU)
+	return startN, startN + int(lengthU), nil
+}
+
+// arrayDataFieldWidth returns the data byte width for one array element.
+func arrayDataFieldWidth(field wasmir.FieldType) (uint32, error) {
+	switch field.Packed {
+	case wasmir.PackedTypeI8:
+		return 1, nil
+	case wasmir.PackedTypeI16:
+		return 2, nil
+	}
+	switch field.Type {
+	case wasmir.ValueTypeI32, wasmir.ValueTypeF32:
+		return 4, nil
+	case wasmir.ValueTypeI64, wasmir.ValueTypeF64:
+		return 8, nil
+	case wasmir.ValueTypeV128:
+		return 16, nil
+	default:
+		return 0, fmt.Errorf("array type is not numeric or vector")
+	}
+}
+
+// valueFromArrayData decodes one little-endian array data element.
+func valueFromArrayData(field wasmir.FieldType, data []byte) Value {
+	switch field.Packed {
+	case wasmir.PackedTypeI8:
+		return Value{Type: wasmir.ValueTypeI32, I32: int32(data[0])}
+	case wasmir.PackedTypeI16:
+		return Value{Type: wasmir.ValueTypeI32, I32: int32(binary.LittleEndian.Uint16(data))}
+	}
+	switch field.Type {
+	case wasmir.ValueTypeI32:
+		return Value{Type: wasmir.ValueTypeI32, I32: int32(binary.LittleEndian.Uint32(data))}
+	case wasmir.ValueTypeI64:
+		return Value{Type: wasmir.ValueTypeI64, I64: int64(binary.LittleEndian.Uint64(data))}
+	case wasmir.ValueTypeF32:
+		return Value{Type: wasmir.ValueTypeF32, F32: math.Float32frombits(binary.LittleEndian.Uint32(data))}
+	case wasmir.ValueTypeF64:
+		return Value{Type: wasmir.ValueTypeF64, F64: math.Float64frombits(binary.LittleEndian.Uint64(data))}
+	case wasmir.ValueTypeV128:
+		var v [16]byte
+		copy(v[:], data)
+		return Value{Type: wasmir.ValueTypeV128, V128: v}
+	default:
+		return Value{}
 	}
 }
 

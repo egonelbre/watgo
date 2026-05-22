@@ -111,10 +111,11 @@ type instr struct {
 	// kind determines how to interpret it: i32.const uses int32(bits),
 	// i64.const uses bits, f32.const uses uint32(bits), and f64.const uses
 	// uint64(bits). For memory load/store instructions, bits stores the raw
-	// uint64 bit pattern of the static offset immediate. For memory.copy and
-	// memory.init, bits stores the secondary index immediate. Indirect calls
-	// use bits for the call type index, and table bulk instructions use it for
-	// the source table or element segment index.
+	// uint64 bit pattern of the static offset immediate. For memory.copy,
+	// memory.init, array.copy, array.{new,init}_{data,elem}, bits stores the
+	// secondary index immediate. Indirect calls use bits for the call type
+	// index, and table bulk instructions use it for the source table or
+	// element segment index.
 	bits int64
 }
 
@@ -212,6 +213,12 @@ func compileFunction(m *wasmir.Module, fn *wasmir.Function) (*function, error) {
 		case wasmir.InstrArrayNewFixed:
 			op.index = ins.TypeIndex
 			op.bits = int64(ins.FixedCount)
+		case wasmir.InstrArrayNewData, wasmir.InstrArrayInitData:
+			op.index = ins.TypeIndex
+			op.bits = int64(ins.DataIndex)
+		case wasmir.InstrArrayNewElem, wasmir.InstrArrayInitElem:
+			op.index = ins.TypeIndex
+			op.bits = int64(ins.ElemIndex)
 		case wasmir.InstrStructGet, wasmir.InstrStructGetS, wasmir.InstrStructGetU,
 			wasmir.InstrStructSet:
 			op.index = ins.TypeIndex
@@ -219,6 +226,9 @@ func compileFunction(m *wasmir.Module, fn *wasmir.Function) (*function, error) {
 		case wasmir.InstrArrayGet, wasmir.InstrArrayGetS, wasmir.InstrArrayGetU,
 			wasmir.InstrArraySet, wasmir.InstrArrayFill:
 			op.index = ins.TypeIndex
+		case wasmir.InstrArrayCopy:
+			op.index = ins.TypeIndex
+			op.bits = int64(ins.SourceTypeIndex)
 		case wasmir.InstrGlobalGet, wasmir.InstrGlobalSet:
 			op.index = ins.GlobalIndex
 		case wasmir.InstrMemorySize, wasmir.InstrMemoryGrow, wasmir.InstrMemoryFill:

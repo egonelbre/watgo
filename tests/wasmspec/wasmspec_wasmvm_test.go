@@ -26,12 +26,6 @@ var wasmSpecWasmvmScriptsFlag = flag.String(
 // wasmSpecWasmvmDeniedScripts lists spec scripts not currently run through the
 // wasmvm backend. Entries ending in "/" deny an entire directory subtree.
 var wasmSpecWasmvmDeniedScripts = []string{
-	"scripts/gc/array.wast",
-	"scripts/gc/array_copy.wast",
-	"scripts/gc/array_init_data.wast",
-	"scripts/gc/array_init_elem.wast",
-	"scripts/gc/array_new_data.wast",
-	"scripts/gc/array_new_elem.wast",
 	"scripts/gc/extern.wast",
 	"scripts/gc/type-subtyping.wast",
 
