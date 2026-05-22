@@ -66,15 +66,9 @@ func TestExceptionThrowCatchAndThrowRef(t *testing.T) {
 		t.Fatalf("throw error = %q, want wasm exception", err)
 	}
 
-	results := callExport(t, inst, "catch_payload", wasmvm.I32(41))
-	if len(results) != 1 || results[0] != wasmvm.I32(42) {
-		t.Fatalf("catch_payload got results %#v, want i32 42", results)
-	}
+	expectI32Result(t, inst, "catch_payload", wasmvm.I32(42), wasmvm.I32(41))
 
-	results = callExport(t, inst, "catch_ref_rethrow", wasmvm.I32(42))
-	if len(results) != 1 || results[0] != wasmvm.I32(42) {
-		t.Fatalf("catch_ref_rethrow got results %#v, want i32 42", results)
-	}
+	expectI32Result(t, inst, "catch_ref_rethrow", wasmvm.I32(42), wasmvm.I32(42))
 	rethrow, ok := inst.ExportedFunc("catch_ref_rethrow")
 	if !ok {
 		t.Fatal("missing catch_ref_rethrow export")
@@ -137,8 +131,5 @@ func TestSharedTagImportExport(t *testing.T) {
 		t.Fatalf("Instantiate catcher failed: %v", err)
 	}
 
-	results := callExport(t, catcher, "catch_imported_throw", wasmvm.I32(41))
-	if len(results) != 1 || results[0] != wasmvm.I32(42) {
-		t.Fatalf("catch_imported_throw got results %#v, want i32 42", results)
-	}
+	expectI32Result(t, catcher, "catch_imported_throw", wasmvm.I32(42), wasmvm.I32(41))
 }

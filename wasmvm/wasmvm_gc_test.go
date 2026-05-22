@@ -6,16 +6,6 @@ import (
 	"github.com/eliben/watgo/wasmvm"
 )
 
-// expectI32Result calls an exported function and checks for one i32 result.
-func expectI32Result(t *testing.T, inst *wasmvm.ModuleInstance, name string, want wasmvm.Value, args ...wasmvm.Value) {
-	t.Helper()
-
-	results := callExport(t, inst, name, args...)
-	if len(results) != 1 || results[0] != want {
-		t.Fatalf("%s got results %#v, want %#v", name, results, want)
-	}
-}
-
 // TestGCRefI31 checks i31 construction and signed/unsigned extraction.
 func TestGCRefI31(t *testing.T) {
 	rt := wasmvm.NewRuntime()

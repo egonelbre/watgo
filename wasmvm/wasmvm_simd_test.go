@@ -209,10 +209,7 @@ func TestV128MemoryOps(t *testing.T) {
 		0x44, 0x33, 0x22, 0x11, 0x88, 0x77, 0x66, 0x55,
 		0xcc, 0xbb, 0xaa, 0x99, 0x00, 0xff, 0xee, 0xdd,
 	})
-	results := callExport(t, inst, "store16_lane")
-	if len(results) != 1 || results[0] != wasmvm.I32(0x1122) {
-		t.Fatalf("store16_lane got results %#v, want %#v", results, wasmvm.I32(0x1122))
-	}
+	expectI32Result(t, inst, "store16_lane", wasmvm.I32(0x1122))
 }
 
 // checkV128Export calls name and verifies that it returns the expected v128.

@@ -27,15 +27,9 @@ func TestMemoryI32LoadStore(t *testing.T) {
 		t.Fatalf("Instantiate failed: %v", err)
 	}
 
-	results := callExport(t, inst, "zero")
-	if len(results) != 1 || results[0] != wasmvm.I32(0) {
-		t.Fatalf("zero got results %#v, want i32 0", results)
-	}
+	expectI32Result(t, inst, "zero", wasmvm.I32(0))
 
-	results = callExport(t, inst, "roundtrip", wasmvm.I32(12), wasmvm.I32(0x12345678))
-	if len(results) != 1 || results[0] != wasmvm.I32(0x12345678) {
-		t.Fatalf("roundtrip got results %#v, want i32 0x12345678", results)
-	}
+	expectI32Result(t, inst, "roundtrip", wasmvm.I32(0x12345678), wasmvm.I32(12), wasmvm.I32(0x12345678))
 }
 
 func TestActiveDataSegments(t *testing.T) {
@@ -59,15 +53,9 @@ func TestActiveDataSegments(t *testing.T) {
 		t.Fatalf("Instantiate failed: %v", err)
 	}
 
-	results := callExport(t, inst, "load0")
-	if len(results) != 1 || results[0] != wasmvm.I32(0x44434241) {
-		t.Fatalf("load0 got results %#v, want i32 0x44434241", results)
-	}
+	expectI32Result(t, inst, "load0", wasmvm.I32(0x44434241))
 
-	results = callExport(t, inst, "load1")
-	if len(results) != 1 || results[0] != wasmvm.I32(0x5a595857) {
-		t.Fatalf("load1 got results %#v, want i32 0x5a595857", results)
-	}
+	expectI32Result(t, inst, "load1", wasmvm.I32(0x5a595857))
 }
 
 func TestI32NarrowMemoryOps(t *testing.T) {
@@ -118,10 +106,7 @@ func TestI32NarrowMemoryOps(t *testing.T) {
 		{name: "store8", want: 0x78},
 		{name: "store16", want: 0x5678},
 	} {
-		results := callExport(t, inst, tt.name)
-		if len(results) != 1 || results[0] != wasmvm.I32(tt.want) {
-			t.Fatalf("%s got results %#v, want i32 %d", tt.name, results, tt.want)
-		}
+		expectI32Result(t, inst, tt.name, wasmvm.I32(tt.want))
 	}
 }
 
@@ -205,12 +190,9 @@ func TestMemory64ScalarOps(t *testing.T) {
 		t.Fatalf("Instantiate failed: %v", err)
 	}
 
-	results := callExport(t, inst, "load_i32")
-	if len(results) != 1 || results[0] != wasmvm.I32(0x04030201) {
-		t.Fatalf("load_i32 got results %#v, want i32 0x04030201", results)
-	}
+	expectI32Result(t, inst, "load_i32", wasmvm.I32(0x04030201))
 
-	results = callExport(t, inst, "load_i64")
+	results := callExport(t, inst, "load_i64")
 	if len(results) != 1 || results[0] != wasmvm.I64(0x0807060504030201) {
 		t.Fatalf("load_i64 got results %#v, want i64 0x0807060504030201", results)
 	}
