@@ -59,7 +59,8 @@ experimentation, not for high-performance wasm execution.
 
 ### CLI
 
-`watgo` currently provides basic `parse`, `print`, and `validate` subcommands.
+`watgo` currently provides basic `parse`, `print`, `validate`, and
+`interpret` subcommands.
 
 For supported subcommands and flags, the CLI aims to stay compatible with
 [`wasm-tools`](https://github.com/bytecodealliance/wasm-tools).
@@ -75,6 +76,13 @@ watgo validate input.wat
 
 # Validate a WASM binary.
 watgo validate input.wasm
+
+# Instantiate a module and invoke an exported function with wasmvm.
+watgo interpret input.wat --invoke add 3 5
+
+# Provide host.print imports while interpreting.
+# Run 'watgo help interpret' for more details on how this works.
+watgo interpret input.wat --host-print --invoke run
 
 # Read WAT from stdin and write WASM to stdout.
 cat input.wat | watgo parse > output.wasm

@@ -3,7 +3,9 @@ Immediate TODOs
 
 vm:
 
-* remove deny list?
+* interpret: not sure about the host print format, why the => ?
+  * consolidate all help in one place (help output in cli?)
+  * simplify host print stuff (one explicit func per type)
 
 Longer-term plans
 -----------------

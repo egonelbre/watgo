@@ -185,6 +185,90 @@ func TestRunValidateWASM(t *testing.T) {
 	}
 }
 
+func TestRunInterpretInvoke(t *testing.T) {
+	wat := `
+(module
+  (func (export "add") (param i32 i32) (result i32)
+    local.get 0
+    local.get 1
+    i32.add))`
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"interpret", "--invoke", "add", "20", "22"}, strings.NewReader(wat), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("Run returned %d, stderr=%q", code, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected stderr: %q", stderr.String())
+	}
+	if got, want := stdout.String(), "add(20, 22) => i32:42\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+}
+
+func TestRunInterpretHostPrint(t *testing.T) {
+	wat := `
+(module
+  (import "host" "print" (func $print (param i32)))
+  (func (export "run")
+    i32.const 7
+    call $print))`
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"interpret", "--host-print", "--invoke", "run"}, strings.NewReader(wat), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("Run returned %d, stderr=%q", code, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected stderr: %q", stderr.String())
+	}
+	want := "called host host.print(i32:7) =>\nrun() =>\n"
+	if got := stdout.String(); got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+}
+
+func TestRunInterpretHostPrintMultipleSignatures(t *testing.T) {
+	wat := `
+(module
+  (import "host" "print" (func $print_i32 (param i32)))
+  (import "host" "print" (func $print_i64 (param i64)))
+  (func (export "run")
+    i32.const 7
+    call $print_i32
+    i64.const 8
+    call $print_i64))`
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"interpret", "--host-print", "--invoke", "run"}, strings.NewReader(wat), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("Run returned %d, stderr=%q", code, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected stderr: %q", stderr.String())
+	}
+	want := "called host host.print(i32:7) =>\ncalled host host.print(i64:8) =>\nrun() =>\n"
+	if got := stdout.String(); got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+}
+
+func TestRunInterpretNegativeArgument(t *testing.T) {
+	wat := `
+(module
+  (func (export "id") (param i32) (result i32)
+    local.get 0))`
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"interpret", "--invoke", "id", "-1"}, strings.NewReader(wat), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("Run returned %d, stderr=%q", code, stderr.String())
+	}
+	if got, want := stdout.String(), "id(-1) => i32:4294967295\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+}
+
 func TestRunPrintBinaryWASMToStdout(t *testing.T) {
 	// `watgo print` should render basic binary wasm input as WAT on stdout.
 	wasm, err := watgo.CompileWATToWASM([]byte("(module (func (export \"f\") (result i32) (i32.const 3)))"))

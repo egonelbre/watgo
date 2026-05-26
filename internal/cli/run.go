@@ -34,6 +34,8 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return runPrint(args[1:], stdin, stdout, stderr)
 	case "validate":
 		return runValidate(args[1:], stdin, stdout, stderr)
+	case "interpret":
+		return runInterpret(args[1:], stdin, stdout, stderr)
 	case "-V", "--version":
 		fmt.Fprintln(stdout, versionString())
 		return 0
@@ -49,6 +51,8 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			return runPrint([]string{"--help"}, stdin, stdout, stderr)
 		case "validate":
 			return runValidate([]string{"--help"}, stdin, stdout, stderr)
+		case "interpret":
+			return runInterpret([]string{"--help"}, stdin, stdout, stderr)
 		default:
 			fmt.Fprintf(stderr, "watgo: unknown help topic %q\n\n", args[1])
 			printRootUsage(stderr)
@@ -274,6 +278,75 @@ func runValidate(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	return 0
 }
 
+// runInterpret implements `watgo interpret`.
+//
+// The command instantiates a validated WAT or WASM module with wasmvm. When
+// --invoke is present, it calls the named exported function and prints the
+// returned values. --host-print supplies WABT-style host.print imports.
+func runInterpret(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	opts, err := parseInterpretArgs(args)
+	if err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			printInterpretUsage(stderr)
+			return 0
+		}
+		fmt.Fprintf(stderr, "watgo interpret: %v\n", err)
+		return 2
+	}
+	return runInterpretOptions(opts, stdin, stdout, stderr)
+}
+
+type interpretOptions struct {
+	inputPath  string
+	invokeName string
+	invokeArgs []string
+	hostPrint  bool
+}
+
+// parseInterpretArgs parses `watgo interpret` flags and positionals.
+//
+// Arguments after --invoke FUNC are treated as WebAssembly function arguments,
+// so only command flags that appear before --invoke are recognized.
+func parseInterpretArgs(args []string) (interpretOptions, error) {
+	opts := interpretOptions{inputPath: "-"}
+	var positionals []string
+
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "-h" || arg == "--help":
+			return interpretOptions{}, flag.ErrHelp
+		case arg == "--host-print":
+			opts.hostPrint = true
+		case arg == "--invoke":
+			if i+1 >= len(args) {
+				return interpretOptions{}, fmt.Errorf("flag needs an argument: --invoke")
+			}
+			opts.invokeName = args[i+1]
+			opts.invokeArgs = append([]string(nil), args[i+2:]...)
+			i = len(args)
+		case strings.HasPrefix(arg, "--invoke="):
+			opts.invokeName = strings.TrimPrefix(arg, "--invoke=")
+			if opts.invokeName == "" {
+				return interpretOptions{}, fmt.Errorf("flag needs an argument: --invoke")
+			}
+			opts.invokeArgs = append([]string(nil), args[i+1:]...)
+			i = len(args)
+		case strings.HasPrefix(arg, "-") && arg != "-":
+			return interpretOptions{}, fmt.Errorf("unknown flag %q", arg)
+		default:
+			positionals = append(positionals, arg)
+		}
+	}
+	if len(positionals) > 1 {
+		return interpretOptions{}, fmt.Errorf("too many input files")
+	}
+	if len(positionals) == 1 {
+		opts.inputPath = positionals[0]
+	}
+	return opts, nil
+}
+
 // parseToBinary compiles WAT text src to binary WebAssembly bytes.
 func parseToBinary(src []byte) ([]byte, error) {
 	return watgo.CompileWATToWASM(src)
@@ -343,11 +416,13 @@ Usage:
   watgo parse [OPTIONS] [INPUT]
   watgo print [OPTIONS] [INPUT]
   watgo validate [INPUT]
+  watgo interpret [OPTIONS] [INPUT] [--invoke FUNC [ARGS...]]
 
 Commands:
   parse              Parse WebAssembly text or binary input
   print              Print a WebAssembly binary as text
   validate           Validate a WebAssembly text or binary file
+  interpret          Instantiate and invoke a module with wasmvm
   help               Show help for the root command or a subcommand
   -V, --version      Print version information
 
@@ -424,6 +499,39 @@ Arguments:
 Options:
   -h, --help
             Print help
+`)
+}
+
+// printInterpretUsage prints help text for `watgo interpret`.
+func printInterpretUsage(w io.Writer) {
+	fmt.Fprint(w, `Instantiate and invoke a WebAssembly module with wasmvm.
+
+Usage:
+  watgo interpret [OPTIONS] [INPUT] [--invoke FUNC [ARGS...]]
+
+Arguments:
+  [INPUT]    Input file to process, or "-" for stdin. Text or binary WebAssembly are accepted.
+  [ARGS...]  Arguments for FUNC. Numeric argument types are inferred from FUNC's signature.
+
+Options:
+      --invoke <FUNC>
+            Invoke exported function FUNC. Arguments after FUNC are passed to the function.
+      --host-print
+            Supply WABT-style imports named host.print and print calls to stdout.
+  -h, --help
+            Print help
+
+Notes:
+  Flags must appear before --invoke. Arguments after --invoke FUNC are treated as function arguments.
+  --host-print matches function imports whose module is "host" and field is "print".
+  The declared import signature is used, for example:
+    (import "host" "print" (func $print_i32 (param i32)))
+  A host.print import may have any parameter list and zero or one result.
+  Multiple host.print imports with different signatures are supported. If a host.print
+  import declares one result, interpret returns the zero value for that result type.
+  A declared WebAssembly start function, (start $func), runs during instantiation.
+  Without --invoke, instantiation and the declared start function are the only execution.
+  An exported function named _start is not called automatically.
 `)
 }
 

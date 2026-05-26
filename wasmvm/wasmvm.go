@@ -425,6 +425,15 @@ type Func struct {
 // isExtern marks Func pointers as valid import objects.
 func (*Func) isExtern() {}
 
+// Type returns f's WebAssembly function signature.
+func (f *Func) Type() (params, results []wasmir.ValueType, err error) {
+	ft, err := f.inst.vm.FuncType(f.index)
+	if err != nil {
+		return nil, nil, err
+	}
+	return ft.Params, ft.Results, nil
+}
+
 // Call invokes f with WebAssembly runtime values.
 //
 // args must contain one Value per function parameter, in parameter order. On
