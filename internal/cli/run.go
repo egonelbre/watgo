@@ -523,15 +523,17 @@ Options:
 
 Notes:
   Flags must appear before --invoke. Arguments after --invoke FUNC are treated as function arguments.
+
   --host-print provides these function imports:
     (import "host" "print_i32" (func (param i32)))
     (import "host" "print_i64" (func (param i64)))
     (import "host" "print_f32" (func (param f32)))
     (import "host" "print_f64" (func (param f64)))
+
   Each host print call writes the bare value to stdout followed by a newline.
+
   A declared WebAssembly start function, (start $func), runs during instantiation.
   Without --invoke, instantiation and the declared start function are the only execution.
-  An exported function named _start is not called automatically.
 `)
 }
 
