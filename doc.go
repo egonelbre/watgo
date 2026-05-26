@@ -1,6 +1,11 @@
 // Package watgo provides the public high-level Go API for parsing,
 // validating, decoding, and encoding WebAssembly modules.
 //
+// Runtime support lives in github.com/eliben/watgo/wasmvm,
+// which exposes a small interpreter for testing and experimentation with
+// validated [wasmir.Module] values. It is not designed for high-performance
+// execution.
+//
 // The package is centered on semantic IR represented by [wasmir.Module].
 // Text-format WAT and binary WASM both normalize into that IR:
 //

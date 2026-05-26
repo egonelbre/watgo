@@ -10,7 +10,7 @@
 </p>
 
 **W**eb**A**ssembly **T**oolkit for **Go** (**watgo**) to parse [WASM](https://www.w3.org/TR/wasm-core-2/) text or decode WASM binary into internal data
-structures, allowing conversions, etc.
+structures, allowing conversions, validation, and testing-oriented execution.
 
 ### WASM feature support and proposals
 
@@ -45,6 +45,13 @@ go run github.com/eliben/watgo/cmd/watgo@latest
 
 The public Go API is documented on [`pkg.go.dev`](https://pkg.go.dev/github.com/eliben/watgo),
 including runnable examples for the high-level functions in `package watgo`.
+
+Runtime support is available in package
+[`wasmvm`](https://pkg.go.dev/github.com/eliben/watgo/wasmvm). `wasmvm` is a
+small interpreter for validated `wasmir.Module` values; it can instantiate
+modules, call exported functions, provide Go callbacks for function imports, and
+share exported state later instantiations. It is intended for testing and
+experimentation, not for high-performance wasm execution.
 
 <p align="center">
   <img alt="Logo" src="doc/watgo-diagram.png" />
@@ -88,7 +95,8 @@ go test ./...
 ```
 
 Some of the end-to-end tests execute compiled modules under Node.js, so Node is
-required for the full suite.
+required for the full suite. Selected spec and WABT-style execution coverage
+also runs through `wasmvm`.
 
 For more detail on the different test sets and how to refresh them from
 upstream, see [`tests/README.md`](tests/README.md).
