@@ -80,7 +80,7 @@ watgo validate input.wasm
 # Instantiate a module and invoke an exported function with wasmvm.
 watgo interpret input.wat --invoke add 3 5
 
-# Provide host.print imports while interpreting.
+# Provide simple numeric host printing imports while interpreting.
 # Run 'watgo help interpret' for more details on how this works.
 watgo interpret input.wat --host-print --invoke run
 

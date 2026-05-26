@@ -282,7 +282,7 @@ func runValidate(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 //
 // The command instantiates a validated WAT or WASM module with wasmvm. When
 // --invoke is present, it calls the named exported function and prints the
-// returned values. --host-print supplies WABT-style host.print imports.
+// returned values. --host-print supplies fixed numeric host print imports.
 func runInterpret(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	opts, err := parseInterpretArgs(args)
 	if err != nil {
@@ -517,18 +517,18 @@ Options:
       --invoke <FUNC>
             Invoke exported function FUNC. Arguments after FUNC are passed to the function.
       --host-print
-            Supply WABT-style imports named host.print and print calls to stdout.
+            Supply simple numeric host printing imports that write bare values to stdout.
   -h, --help
             Print help
 
 Notes:
   Flags must appear before --invoke. Arguments after --invoke FUNC are treated as function arguments.
-  --host-print matches function imports whose module is "host" and field is "print".
-  The declared import signature is used, for example:
-    (import "host" "print" (func $print_i32 (param i32)))
-  A host.print import may have any parameter list and zero or one result.
-  Multiple host.print imports with different signatures are supported. If a host.print
-  import declares one result, interpret returns the zero value for that result type.
+  --host-print provides these function imports:
+    (import "host" "print_i32" (func (param i32)))
+    (import "host" "print_i64" (func (param i64)))
+    (import "host" "print_f32" (func (param f32)))
+    (import "host" "print_f64" (func (param f64)))
+  Each host print call writes the bare value to stdout followed by a newline.
   A declared WebAssembly start function, (start $func), runs during instantiation.
   Without --invoke, instantiation and the declared start function are the only execution.
   An exported function named _start is not called automatically.

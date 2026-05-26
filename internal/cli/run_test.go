@@ -209,10 +209,10 @@ func TestRunInterpretInvoke(t *testing.T) {
 func TestRunInterpretHostPrint(t *testing.T) {
 	wat := `
 (module
-  (import "host" "print" (func $print (param i32)))
+  (import "host" "print_i32" (func $print_i32 (param i32)))
   (func (export "run")
     i32.const 7
-    call $print))`
+    call $print_i32))`
 
 	var stdout, stderr bytes.Buffer
 	code := Run([]string{"interpret", "--host-print", "--invoke", "run"}, strings.NewReader(wat), &stdout, &stderr)
@@ -222,22 +222,28 @@ func TestRunInterpretHostPrint(t *testing.T) {
 	if stderr.Len() != 0 {
 		t.Fatalf("unexpected stderr: %q", stderr.String())
 	}
-	want := "called host host.print(i32:7) =>\nrun() =>\n"
+	want := "7\n"
 	if got := stdout.String(); got != want {
 		t.Fatalf("stdout = %q, want %q", got, want)
 	}
 }
 
-func TestRunInterpretHostPrintMultipleSignatures(t *testing.T) {
+func TestRunInterpretHostPrintNumericTypes(t *testing.T) {
 	wat := `
 (module
-  (import "host" "print" (func $print_i32 (param i32)))
-  (import "host" "print" (func $print_i64 (param i64)))
+  (import "host" "print_i32" (func $print_i32 (param i32)))
+  (import "host" "print_i64" (func $print_i64 (param i64)))
+  (import "host" "print_f32" (func $print_f32 (param f32)))
+  (import "host" "print_f64" (func $print_f64 (param f64)))
   (func (export "run")
     i32.const 7
     call $print_i32
     i64.const 8
-    call $print_i64))`
+    call $print_i64
+    f32.const 1.5
+    call $print_f32
+    f64.const 2.5
+    call $print_f64))`
 
 	var stdout, stderr bytes.Buffer
 	code := Run([]string{"interpret", "--host-print", "--invoke", "run"}, strings.NewReader(wat), &stdout, &stderr)
@@ -247,7 +253,7 @@ func TestRunInterpretHostPrintMultipleSignatures(t *testing.T) {
 	if stderr.Len() != 0 {
 		t.Fatalf("unexpected stderr: %q", stderr.String())
 	}
-	want := "called host host.print(i32:7) =>\ncalled host host.print(i64:8) =>\nrun() =>\n"
+	want := "7\n8\n1.5\n2.5\n"
 	if got := stdout.String(); got != want {
 		t.Fatalf("stdout = %q, want %q", got, want)
 	}

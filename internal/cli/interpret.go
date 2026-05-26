@@ -69,14 +69,15 @@ func runInterpretOptions(opts interpretOptions, stdin io.Reader, stdout, stderr 
 		fmt.Fprintf(stderr, "watgo interpret: %v\n", err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "%s =>", formatInvocationLabel(opts.invokeName, opts.invokeArgs))
-	if len(results) > 0 {
-		formatted := make([]string, len(results))
-		for i, result := range results {
-			formatted[i] = formatRuntimeValue(result)
-		}
-		fmt.Fprintf(stdout, " %s", strings.Join(formatted, ", "))
+	if len(results) == 0 {
+		return 0
 	}
+	fmt.Fprintf(stdout, "%s =>", formatInvocationLabel(opts.invokeName, opts.invokeArgs))
+	formatted := make([]string, len(results))
+	for i, result := range results {
+		formatted[i] = formatRuntimeValue(result)
+	}
+	fmt.Fprintf(stdout, " %s", strings.Join(formatted, ", "))
 	fmt.Fprintln(stdout)
 	return 0
 }
@@ -99,68 +100,29 @@ func parseValidatedModule(src []byte) (*wasmir.Module, error) {
 
 // interpretImports constructs the import object map used for interpretation.
 //
-// When hostPrint is enabled, WABT-style host.print imports are rewritten to
-// unique internal names so imports with different signatures can coexist in the
-// wasmvm import map.
+// When hostPrint is enabled, fixed host.print_i32, host.print_i64,
+// host.print_f32, and host.print_f64 imports are supplied.
 func interpretImports(m *wasmir.Module, hostPrint bool, stdout io.Writer) (*wasmir.Module, wasmvm.Imports, error) {
 	if !hostPrint {
 		return m, nil, nil
 	}
 
-	vmModule := *m
-	vmModule.Imports = append([]wasmir.Import(nil), m.Imports...)
-	imports := wasmvm.Imports{}
-	for i, imp := range vmModule.Imports {
-		if imp.Kind != wasmir.ExternalKindFunction || imp.Module != "host" || imp.Name != "print" {
-			continue
-		}
-		if int(imp.TypeIdx) >= len(vmModule.Types) {
-			return nil, nil, fmt.Errorf("host.print import has invalid function type index %d", imp.TypeIdx)
-		}
-		sig := vmModule.Types[imp.TypeIdx]
-		if sig.Kind != wasmir.TypeDefKindFunc {
-			return nil, nil, fmt.Errorf("host.print import has non-function type index %d", imp.TypeIdx)
-		}
-		internalName := fmt.Sprintf("__watgo_host_print_%d", i)
-		vmModule.Imports[i].Name = internalName
-		if imports["host"] == nil {
-			imports["host"] = map[string]wasmvm.Extern{}
-		}
-		hostFunc, err := interpretHostPrint(sig, stdout)
-		if err != nil {
-			return nil, nil, err
-		}
-		imports["host"][internalName] = hostFunc
-	}
-	if len(imports) == 0 {
-		return &vmModule, nil, nil
-	}
-	return &vmModule, imports, nil
+	return m, wasmvm.Imports{
+		"host": {
+			"print_i32": interpretHostPrint(wasmir.ValueTypeI32, stdout),
+			"print_i64": interpretHostPrint(wasmir.ValueTypeI64, stdout),
+			"print_f32": interpretHostPrint(wasmir.ValueTypeF32, stdout),
+			"print_f64": interpretHostPrint(wasmir.ValueTypeF64, stdout),
+		},
+	}, nil
 }
 
-// interpretHostPrint returns a host callback for one declared host.print import
-// signature.
-func interpretHostPrint(sig wasmir.TypeDef, stdout io.Writer) (*wasmvm.HostFunc, error) {
-	if len(sig.Results) > 1 {
-		return nil, fmt.Errorf("host.print import has %d results", len(sig.Results))
-	}
-	resultText := ""
-	if len(sig.Results) == 1 {
-		resultText = " " + valueKindName(sig.Results[0]) + ":0"
-	}
-	return wasmvm.NewHostFunc(sig.Params, sig.Results, func(_ *wasmvm.Context, args []wasmvm.Value) ([]wasmvm.Value, error) {
-		formattedArgs := make([]string, len(args))
-		for i, arg := range args {
-			formattedArgs[i] = formatHostPrintArg(arg)
-		}
-		fmt.Fprintf(stdout, "called host host.print(%s) =>%s\n", strings.Join(formattedArgs, ", "), resultText)
-
-		results := make([]wasmvm.Value, len(sig.Results))
-		for i, resultType := range sig.Results {
-			results[i] = zeroRuntimeValue(resultType)
-		}
-		return results, nil
-	}), nil
+// interpretHostPrint returns one fixed numeric host printing callback.
+func interpretHostPrint(typ wasmir.ValueType, stdout io.Writer) *wasmvm.HostFunc {
+	return wasmvm.NewHostFunc([]wasmir.ValueType{typ}, nil, func(_ *wasmvm.Context, args []wasmvm.Value) ([]wasmvm.Value, error) {
+		fmt.Fprintln(stdout, formatPrintValue(args[0]))
+		return nil, nil
+	})
 }
 
 // parseRuntimeValue converts one CLI argument into a wasmvm runtime value of
@@ -208,12 +170,6 @@ func parseIntegerBits(text string, bitSize int) (uint64, error) {
 	return strconv.ParseUint(text, 0, bitSize)
 }
 
-// zeroRuntimeValue returns the zero value for typ in wasmvm's runtime value
-// representation.
-func zeroRuntimeValue(typ wasmir.ValueType) wasmvm.Value {
-	return wasmvm.Value{Type: typ}
-}
-
 // formatInvocationLabel formats the left side of an invocation result line.
 func formatInvocationLabel(name string, args []string) string {
 	if len(args) == 0 {
@@ -247,9 +203,20 @@ func formatRuntimeValue(v wasmvm.Value) string {
 	}
 }
 
-// formatHostPrintArg formats one host.print argument value.
-func formatHostPrintArg(v wasmvm.Value) string {
-	return formatRuntimeValue(v)
+// formatPrintValue formats the bare value printed by host print callbacks.
+func formatPrintValue(v wasmvm.Value) string {
+	switch v.Type.Kind {
+	case wasmir.ValueKindI32:
+		return strconv.FormatInt(int64(v.I32), 10)
+	case wasmir.ValueKindI64:
+		return strconv.FormatInt(v.I64, 10)
+	case wasmir.ValueKindF32:
+		return strconv.FormatFloat(float64(v.F32), 'g', -1, 32)
+	case wasmir.ValueKindF64:
+		return strconv.FormatFloat(v.F64, 'g', -1, 64)
+	default:
+		return formatRuntimeValue(v)
+	}
 }
 
 // valueKindName returns the short text label used for a WebAssembly value type
