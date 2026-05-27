@@ -12,13 +12,13 @@ import (
 )
 
 func TestAddModuleEndToEndWithNode(t *testing.T) {
-	if os.Getenv("WATGO_INTEGRATION") == "0" {
-		t.Skip("integration tests disabled with WATGO_INTEGRATION=0")
+	if os.Getenv("WATGO_NODE_TESTS") == "0" {
+		t.Skip("node tests disabled with WATGO_NODE_TESTS=0")
 	}
 
 	nodePath, err := exec.LookPath("node")
 	if err != nil {
-		t.Fatalf("node executable not found (set WATGO_INTEGRATION=0 to skip integration tests): %v", err)
+		t.Fatalf("node executable not found (set WATGO_NODE_TESTS=0 to skip node tests): %v", err)
 	}
 
 	wat := `

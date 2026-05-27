@@ -18,8 +18,8 @@ const wasmWatSamplesDir = "."
 func TestWasmWatSamples(t *testing.T) {
 	// The upstream sample corpus should compile from source WAT and pass its
 	// JavaScript integration checks unchanged.
-	if os.Getenv("WATGO_INTEGRATION") == "0" {
-		t.Skip("integration tests disabled with WATGO_INTEGRATION=0")
+	if os.Getenv("WATGO_NODE_TESTS") == "0" {
+		t.Skip("node tests disabled with WATGO_NODE_TESTS=0")
 	}
 
 	runWasmWatSamplesWith(t, runWasmWatSample)
@@ -67,7 +67,7 @@ func runWasmWatSample(t *testing.T, srcDir string) {
 
 	nodePath, err := exec.LookPath("node")
 	if err != nil {
-		t.Fatalf("node executable not found (set WATGO_INTEGRATION=0 to skip integration tests): %v", err)
+		t.Fatalf("node executable not found (set WATGO_NODE_TESTS=0 to skip node tests): %v", err)
 	}
 
 	workDir := filepath.Join(t.TempDir(), filepath.Base(srcDir))

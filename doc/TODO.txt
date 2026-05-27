@@ -3,9 +3,7 @@ Immediate TODOs
 
 vm:
 
-* interpret: not sure about the host print format, why the => ?
-  * consolidate all help in one place (help output in cli?)
-  * simplify host print stuff (one explicit func per type)
+*
 
 Longer-term plans
 -----------------
@@ -13,3 +11,4 @@ Longer-term plans
 * Will need to figure out what to do about the "threads" proposal, it's at
   stage 4 now. spec tests have it in 'proposals' (not core). Can support it
   later?
+* WASI only do preview1 or go for preview2?

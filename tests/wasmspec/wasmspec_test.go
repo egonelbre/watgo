@@ -75,8 +75,8 @@ func TestWasmSpecScriptsPrintRoundTrip(t *testing.T) {
 func runWasmSpecBackend(t *testing.T, backend wasmSpecBackend) {
 	t.Helper()
 
-	if backend.requiresIntegration && os.Getenv("WATGO_INTEGRATION") == "0" {
-		t.Skip("integration tests disabled with WATGO_INTEGRATION=0")
+	if backend.requiresIntegration && os.Getenv("WATGO_NODE_TESTS") == "0" {
+		t.Skip("node tests disabled with WATGO_NODE_TESTS=0")
 	}
 
 	runWasmSpecScriptFiles(t, backend.scripts, func(t *testing.T, scriptPath string) {

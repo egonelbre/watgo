@@ -1505,7 +1505,7 @@ type syntheticModule struct {
 func newNodeRuntime(ctx context.Context) (*nodeRuntime, error) {
 	nodePath, err := exec.LookPath("node")
 	if err != nil {
-		return nil, fmt.Errorf("node executable not found; install node or set WATGO_INTEGRATION=0 to skip integration tests: %w", err)
+		return nil, fmt.Errorf("node executable not found; install node or set WATGO_NODE_TESTS=0 to skip node tests: %w", err)
 	}
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {

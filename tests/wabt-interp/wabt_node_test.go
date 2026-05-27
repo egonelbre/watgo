@@ -40,7 +40,7 @@ func runWABTNodeFixture(t *testing.T, fixture wabtCompiledFixture) (wabtRunResul
 
 	nodePath, err := exec.LookPath("node")
 	if err != nil {
-		t.Fatalf("node executable not found (set WATGO_INTEGRATION=0 to skip integration tests): %v", err)
+		t.Fatalf("node executable not found (set WATGO_NODE_TESTS=0 to skip node tests): %v", err)
 	}
 
 	exports, err := wabtExports(fixture.m)

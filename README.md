@@ -49,9 +49,9 @@ including runnable examples for the high-level functions in `package watgo`.
 Runtime support is available in package
 [`wasmvm`](https://pkg.go.dev/github.com/eliben/watgo/wasmvm). `wasmvm` is a
 small interpreter for validated `wasmir.Module` values; it can instantiate
-modules, call exported functions, provide Go callbacks for function imports, and
-share exported state later instantiations. It is intended for testing and
-experimentation, not for high-performance wasm execution.
+modules, call exported functions and provide Go callbacks for function imports.
+It is intended for testing and experimentation, not for high-performance wasm
+execution.
 
 <p align="center">
   <img alt="Logo" src="doc/watgo-diagram.png" />
@@ -62,8 +62,8 @@ experimentation, not for high-performance wasm execution.
 `watgo` currently provides basic `parse`, `print`, `validate`, and
 `interpret` subcommands.
 
-For supported subcommands and flags, the CLI aims to stay compatible with
-[`wasm-tools`](https://github.com/bytecodealliance/wasm-tools).
+Where applicable, for  supported subcommands and flags, the CLI aims to stay
+compatible with [`wasm-tools`](https://github.com/bytecodealliance/wasm-tools).
 
 Examples:
 
@@ -103,7 +103,8 @@ go test ./...
 ```
 
 Some of the end-to-end tests execute compiled modules under Node.js, so Node is
-required for the full suite. Selected spec and WABT-style execution coverage
+required for the full suite (set the env var `WATGO_NODE_TESTS=0` to disable
+all Node-dependent tests). Selected spec and WABT-style execution coverage
 also runs through `wasmvm`.
 
 For more detail on the different test sets and how to refresh them from
