@@ -1903,9 +1903,6 @@ func (e *executor) tailCallFunction(index uint32) (bool, []Value, error) {
 	}
 	fn := e.inst.funcs[index]
 	if fn.imported {
-		if e.inst.resolver == nil {
-			return false, nil, fmt.Errorf("resolver is nil")
-		}
 		results, err := e.inst.resolver.CallFunc(index, callArgs)
 		if err != nil {
 			return false, nil, err

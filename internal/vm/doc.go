@@ -1,18 +1,20 @@
-// Package vm contains the private execution engine used by wasmvm.
+// Package vm contains the private execution engine used by
+// [github.com/eliben/watgo/wasmvm].
 //
-// wasmvm owns the public API, imports, exports, and host callbacks.
+// [github.com/eliben/watgo/wasmvm] owns the public API, imports, exports, and
+// host callbacks.
 //
-// vm owns the executable instance state: lowered functions, globals, memories,
-// tables, data segments, element segments, and instruction semantics.
+// Package vm owns the executable instance state: lowered functions, globals,
+// memories, tables, data segments, element segments, and instruction semantics.
 //
-// Instantiate builds an Instance from a validated wasmir.Module.
-// Instance.CallFunc dispatches function-index calls, and Instance.FuncType
-// exposes signatures needed by wasmvm. Resolver is the only bridge back to
-// wasmvm; it is used for imported function calls and host-shared globals and
-// memories.
+// [Instantiate] builds an [Instance] from a validated [wasmir.Module].
+// [Instance.CallFunc] dispatches function-index calls, and [Instance.FuncType]
+// exposes signatures needed by [github.com/eliben/watgo/wasmvm]. [Resolver] is
+// the only bridge back to [github.com/eliben/watgo/wasmvm]; it is used for
+// imported function calls and host-shared globals and memories.
 //
-// A wasm-to-wasm call re-enters Instance.CallFunc and creates another executor
-// frame. A wasm-to-host call goes through Resolver.CallFunc:
+// A wasm-to-wasm call re-enters [Instance.CallFunc] and creates another
+// executor frame. A wasm-to-host call goes through [Resolver.CallFunc]:
 //
 //	wasmvm.Func.Call(A)
 //	  -> Instance.CallFunc(A)

@@ -261,9 +261,15 @@ type elemInst struct {
 }
 
 // Instantiate creates VM-owned execution state for m.
+//
+// m and resolver must be non-nil. The resolver is required for imported
+// functions and host-owned imported globals, memories, tables, and tags.
 func Instantiate(m *wasmir.Module, resolver Resolver) (*Instance, error) {
 	if m == nil {
 		return nil, fmt.Errorf("module is nil")
+	}
+	if resolver == nil {
+		return nil, fmt.Errorf("resolver is nil")
 	}
 	inst := &Instance{
 		m:        m,
@@ -313,9 +319,6 @@ func (inst *Instance) buildTags() error {
 		}
 		if len(ft.Results) != 0 {
 			return fmt.Errorf("tag import %q.%q has non-empty result type", imp.Module, imp.Name)
-		}
-		if inst.resolver == nil {
-			return fmt.Errorf("resolver is nil")
 		}
 		tag, err := inst.resolver.Tag(uint32(len(inst.tags)), ft)
 		if err != nil {
@@ -384,10 +387,6 @@ func (inst *Instance) CallFunc(index uint32, args []Value) ([]Value, error) {
 		return nil, err
 	}
 	if fn.imported {
-		if inst.resolver == nil {
-			inst.exitCall()
-			return nil, fmt.Errorf("resolver is nil")
-		}
 		results, err := inst.resolver.CallFunc(index, args)
 		if err != nil {
 			inst.exitCall()
@@ -531,9 +530,6 @@ func (inst *Instance) buildFuncs() error {
 func (inst *Instance) buildGlobals() error {
 	for i, g := range inst.m.Globals {
 		if g.ImportModule != "" || g.ImportName != "" {
-			if inst.resolver == nil {
-				return fmt.Errorf("resolver is nil")
-			}
 			global, err := inst.resolver.Global(uint32(i), g)
 			if err != nil {
 				return fmt.Errorf("global[%d]: %w", i, err)
@@ -575,9 +571,6 @@ func checkImportedGlobal(def wasmir.Global, global *Global) error {
 func (inst *Instance) buildMemories() error {
 	for i, m := range inst.m.Memories {
 		if m.ImportModule != "" || m.ImportName != "" {
-			if inst.resolver == nil {
-				return fmt.Errorf("resolver is nil")
-			}
 			mem, err := inst.resolver.Memory(uint32(i), m)
 			if err != nil {
 				return fmt.Errorf("memory[%d]: %w", i, err)
@@ -618,9 +611,6 @@ func checkImportedMemory(def wasmir.Memory, mem *Memory) error {
 func (inst *Instance) buildTables() error {
 	for i, t := range inst.m.Tables {
 		if t.ImportModule != "" || t.ImportName != "" {
-			if inst.resolver == nil {
-				return fmt.Errorf("resolver is nil")
-			}
 			table, err := inst.resolver.Table(uint32(i), t)
 			if err != nil {
 				return fmt.Errorf("table[%d]: %w", i, err)
