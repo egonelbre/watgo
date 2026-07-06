@@ -265,7 +265,7 @@ func DecodeModule(bin []byte) (*wasmir.Module, error) {
 	}
 
 	pairCount := min(len(funcTypeIdxs), len(funcBodies))
-	for i := 0; i < pairCount; i++ {
+	for i := range pairCount {
 		out.Funcs = append(out.Funcs, wasmir.Function{
 			TypeIdx: funcTypeIdxs[i],
 			Locals:  funcBodies[i].locals,
@@ -403,7 +403,7 @@ func decodeNameMap(r *bytes.Reader, context string, diags *diag.ErrorList) map[u
 	}
 	out := make(map[uint32]string, count)
 	var prev uint32
-	for i := uint32(0); i < count; i++ {
+	for i := range count {
 		idx, err := readU32(r)
 		if err != nil {
 			diags.Addf("name section %s[%d]: invalid index: %v", context, i, err)
@@ -437,7 +437,7 @@ func decodeIndirectNameMap(r *bytes.Reader, context string, diags *diag.ErrorLis
 	}
 	out := make(map[uint32]map[uint32]string, count)
 	var prev uint32
-	for i := uint32(0); i < count; i++ {
+	for i := range count {
 		idx, err := readU32(r)
 		if err != nil {
 			diags.Addf("name section %s[%d]: invalid index: %v", context, i, err)
@@ -621,7 +621,7 @@ func decodeTypeSection(r *bytes.Reader, diags *diag.ErrorList) []wasmir.TypeDef 
 		return nil
 	}
 	out := make([]wasmir.TypeDef, 0, capN)
-	for i := uint32(0); i < n; i++ {
+	for i := range n {
 		form, err := readByte(r)
 		if err != nil {
 			diags.Addf("type[%d]: failed to read form: %v", i, err)
@@ -635,7 +635,7 @@ func decodeTypeSection(r *bytes.Reader, diags *diag.ErrorList) []wasmir.TypeDef 
 				break
 			}
 			groupStart := len(out)
-			for j := uint32(0); j < groupLen; j++ {
+			for j := range groupLen {
 				typeDef, ok := decodeOneTypeDef(r, groupStart+int(j), diags)
 				if !ok {
 					break
@@ -678,7 +678,7 @@ func decodeOneTypeDef(r *bytes.Reader, index int, diags *diag.ErrorList) (wasmir
 			return wasmir.TypeDef{}, false
 		}
 		typeDef.SuperTypes = make([]uint32, 0, superCount)
-		for j := uint32(0); j < superCount; j++ {
+		for j := range superCount {
 			superIndex, err := readU32(r)
 			if err != nil {
 				diags.Addf("type[%d] super[%d]: invalid type index: %v", index, j, err)
@@ -707,7 +707,7 @@ func decodeOneTypeDef(r *bytes.Reader, index int, diags *diag.ErrorList) (wasmir
 			return wasmir.TypeDef{}, false
 		}
 		fields := make([]wasmir.FieldType, 0, fieldCount)
-		for j := uint32(0); j < fieldCount; j++ {
+		for j := range fieldCount {
 			field, err := decodeFieldType(r)
 			if err != nil {
 				diags.Addf("type[%d] field[%d]: %v", index, j, err)
@@ -778,7 +778,7 @@ func decodeImportSection(r *bytes.Reader, diags *diag.ErrorList) []wasmir.Import
 		return nil
 	}
 	out := make([]wasmir.Import, 0, capN)
-	for i := uint32(0); i < n; i++ {
+	for i := range n {
 		moduleName, err := readName(r)
 		if err != nil {
 			diags.Addf("import[%d]: invalid module name: %v", i, err)
@@ -899,7 +899,7 @@ func decodeTagSection(r *bytes.Reader, diags *diag.ErrorList) []wasmir.Tag {
 		return nil
 	}
 	out := make([]wasmir.Tag, 0, capN)
-	for i := uint32(0); i < n; i++ {
+	for i := range n {
 		attr, err := readByte(r)
 		if err != nil {
 			diags.Addf("tag[%d]: missing attribute: %v", i, err)
@@ -931,7 +931,7 @@ func decodeFunctionSection(r *bytes.Reader, diags *diag.ErrorList) []uint32 {
 		return nil
 	}
 	out := make([]uint32, 0, capN)
-	for i := uint32(0); i < n; i++ {
+	for i := range n {
 		typeIdx, err := readU32(r)
 		if err != nil {
 			diags.Addf("function[%d]: invalid type index: %v", i, err)
@@ -954,7 +954,7 @@ func decodeTableSection(r *bytes.Reader, diags *diag.ErrorList) []wasmir.Table {
 		return nil
 	}
 	out := make([]wasmir.Table, 0, capN)
-	for i := uint32(0); i < n; i++ {
+	for i := range n {
 		first, err := readByte(r)
 		if err != nil {
 			diags.Addf("table[%d]: missing table type: %v", i, err)
@@ -1026,7 +1026,7 @@ func decodeMemorySection(r *bytes.Reader, diags *diag.ErrorList) []wasmir.Memory
 		return nil
 	}
 	out := make([]wasmir.Memory, 0, capN)
-	for i := uint32(0); i < n; i++ {
+	for i := range n {
 		addrType, min, hasMax, max, err := decodeMemoryLimits(r)
 		if err != nil {
 			diags.Addf("memory[%d]: invalid limits: %v", i, err)
@@ -1053,7 +1053,7 @@ func decodeGlobalSection(r *bytes.Reader, diags *diag.ErrorList) []wasmir.Global
 		return nil
 	}
 	out := make([]wasmir.Global, 0, capN)
-	for i := uint32(0); i < n; i++ {
+	for i := range n {
 		ty, err := decodeValueTypeFromReader(r)
 		if err != nil {
 			diags.Addf("global[%d]: invalid value type: %v", i, err)
@@ -1094,7 +1094,7 @@ func decodeElementSection(r *bytes.Reader, diags *diag.ErrorList) []wasmir.Eleme
 		return nil
 	}
 	out := make([]wasmir.ElementSegment, 0, capN)
-	for i := uint32(0); i < n; i++ {
+	for i := range n {
 		flags, err := readU32(r)
 		if err != nil {
 			diags.Addf("element[%d]: missing flags: %v", i, err)
@@ -1202,7 +1202,7 @@ func decodeElementSection(r *bytes.Reader, diags *diag.ErrorList) []wasmir.Eleme
 				break
 			}
 			exprs := make([][]wasmir.Instruction, 0, exprCap)
-			for j := uint32(0); j < exprCount; j++ {
+			for j := range exprCount {
 				expr, err := decodeConstExprInstrs(r)
 				if err != nil {
 					diags.Addf("element[%d] expr[%d]: invalid const expr: %v", i, j, err)
@@ -1234,7 +1234,7 @@ func decodeElementSection(r *bytes.Reader, diags *diag.ErrorList) []wasmir.Eleme
 				break
 			}
 			exprs := make([][]wasmir.Instruction, 0, exprCap)
-			for j := uint32(0); j < exprCount; j++ {
+			for j := range exprCount {
 				expr, err := decodeConstExprInstrs(r)
 				if err != nil {
 					diags.Addf("element[%d] expr[%d]: invalid const expr: %v", i, j, err)
@@ -1266,7 +1266,7 @@ func decodeElementSection(r *bytes.Reader, diags *diag.ErrorList) []wasmir.Eleme
 				break
 			}
 			exprs := make([][]wasmir.Instruction, 0, exprCap)
-			for j := uint32(0); j < exprCount; j++ {
+			for j := range exprCount {
 				expr, err := decodeConstExprInstrs(r)
 				if err != nil {
 					diags.Addf("element[%d] expr[%d]: invalid const expr: %v", i, j, err)
@@ -1302,7 +1302,7 @@ func decodeDataSection(r *bytes.Reader, diags *diag.ErrorList) []wasmir.DataSegm
 		return nil
 	}
 	out := make([]wasmir.DataSegment, 0, capN)
-	for i := uint32(0); i < n; i++ {
+	for i := range n {
 		flags, err := readU32(r)
 		if err != nil {
 			diags.Addf("data[%d]: missing flags: %v", i, err)
@@ -1366,7 +1366,7 @@ func decodeElemFuncIndices(r *bytes.Reader, elemIdx uint32, diags *diag.ErrorLis
 		return nil
 	}
 	funcIndices := make([]uint32, 0, capN)
-	for j := uint32(0); j < funcCount; j++ {
+	for j := range funcCount {
 		idx, err := readU32(r)
 		if err != nil {
 			diags.Addf("element[%d] func[%d]: invalid function index: %v", elemIdx, j, err)
@@ -1454,7 +1454,7 @@ func decodeExportSection(r *bytes.Reader, diags *diag.ErrorList) []wasmir.Export
 		return nil
 	}
 	out := make([]wasmir.Export, 0, capN)
-	for i := uint32(0); i < n; i++ {
+	for i := range n {
 		name, err := readName(r)
 		if err != nil {
 			diags.Addf("export[%d]: invalid name: %v", i, err)
@@ -1494,7 +1494,7 @@ func decodeCodeSection(r *bytes.Reader, diags *diag.ErrorList) []decodedFuncBody
 		return nil
 	}
 	out := make([]decodedFuncBody, 0, capN)
-	for i := uint32(0); i < n; i++ {
+	for i := range n {
 		bodySize, err := readU32(r)
 		if err != nil {
 			diags.Addf("code[%d]: invalid body size: %v", i, err)
@@ -1531,7 +1531,7 @@ func decodeLocals(r *bytes.Reader, funcIdx uint32, diags *diag.ErrorList) []wasm
 
 	var locals []wasmir.ValueType
 	var totalLocals uint64
-	for i := uint32(0); i < declCount; i++ {
+	for i := range declCount {
 		n, err := readU32(r)
 		if err != nil {
 			diags.Addf("code[%d] localdecl[%d]: invalid count: %v", funcIdx, i, err)
@@ -1552,7 +1552,7 @@ func decodeLocals(r *bytes.Reader, funcIdx uint32, diags *diag.ErrorList) []wasm
 			diags.Addf("code[%d]: too many locals", funcIdx)
 			break
 		}
-		for j := uint32(0); j < n; j++ {
+		for range n {
 			locals = append(locals, ty)
 		}
 	}
@@ -1688,7 +1688,7 @@ func decodeInstructionFromDef(r *bytes.Reader, def instrdef.InstructionDef) (was
 			return wasmir.Instruction{}, fmt.Errorf("%s invalid vector length: %w", def.TextName, err)
 		}
 		table := make([]uint32, 0, capN)
-		for i := uint32(0); i < n; i++ {
+		for i := range n {
 			depth, err := readU32(r)
 			if err != nil {
 				return wasmir.Instruction{}, fmt.Errorf("%s invalid depth[%d]: %w", def.TextName, i, err)
@@ -2125,7 +2125,7 @@ func readTryTableImmediate(r *bytes.Reader) (wasmir.Instruction, error) {
 		return wasmir.Instruction{}, fmt.Errorf("try_table invalid catch vector length: %w", err)
 	}
 	ins.TryTableCatches = make([]wasmir.TryTableCatch, 0, capN)
-	for i := uint32(0); i < n; i++ {
+	for i := range n {
 		catch, err := readTryTableCatch(r)
 		if err != nil {
 			return wasmir.Instruction{}, fmt.Errorf("try_table invalid catch[%d]: %w", i, err)
@@ -2237,7 +2237,7 @@ func decodeValueTypeVec(r *bytes.Reader, where string, diags *diag.ErrorList) []
 		return nil
 	}
 	out := make([]wasmir.ValueType, 0, capN)
-	for i := uint32(0); i < n; i++ {
+	for i := range n {
 		vt, err := decodeValueTypeFromReader(r)
 		if err != nil {
 			diags.Addf("%s[%d]: invalid value type: %v", where, i, err)

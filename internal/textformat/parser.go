@@ -1468,7 +1468,7 @@ func (p *Parser) parseInstructionElems(elems []*SExpr, cursor int) (Instruction,
 		}
 		operands := make([]Operand, 0, 16)
 		next := cursor + 1
-		for i := 0; i < 16; i++ {
+		for range 16 {
 			op := p.parseOperand(elems[next])
 			if op == nil {
 				p.emitError(elems[next].loc, "invalid operand for %s", name)
@@ -1960,7 +1960,7 @@ func (p *Parser) parsePlainV128ConstInstr(elem *SExpr, elems []*SExpr, cursor in
 	operands := make([]Operand, 0, laneCount+1)
 	operands = append(operands, shapeOp)
 	next := cursor + 2
-	for i := 0; i < laneCount; i++ {
+	for range laneCount {
 		op := p.parseOperand(elems[next])
 		if op == nil {
 			p.emitError(elems[next].loc, "invalid operand for v128.const")

@@ -115,7 +115,7 @@ func (p *modulePrinter) printTypes() error {
 			//     (type $b (sub $a (struct ...))))
 			p.writeIndent(1)
 			p.buf.WriteString("(rec\n")
-			for j := 0; j < groupSize; j++ {
+			for j := range groupSize {
 				if err := p.printTypeDef(i+j, 2); err != nil {
 					return err
 				}
@@ -721,7 +721,7 @@ func (p *modulePrinter) funcType(typeIdx uint32) (wasmir.TypeDef, error) {
 
 // writeIndent writes one indentation unit per level.
 func (p *modulePrinter) writeIndent(level int) {
-	for i := 0; i < level; i++ {
+	for range level {
 		p.buf.WriteString(p.opts.IndentText)
 	}
 }

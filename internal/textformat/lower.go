@@ -3325,7 +3325,7 @@ func decodeV128ConstOperands(_ *functionLowerer, ins *wasmir.Instruction, operan
 		if len(operands) != 17 {
 			return false
 		}
-		for i := 0; i < 16; i++ {
+		for i := range 16 {
 			lane, ok := lowerI8ConstOperand(operands[i+1])
 			if !ok {
 				return false
@@ -3337,7 +3337,7 @@ func decodeV128ConstOperands(_ *functionLowerer, ins *wasmir.Instruction, operan
 		if len(operands) != 9 {
 			return false
 		}
-		for i := 0; i < 8; i++ {
+		for i := range 8 {
 			lane, ok := lowerI16ConstOperand(operands[i+1])
 			if !ok {
 				return false
@@ -3351,7 +3351,7 @@ func decodeV128ConstOperands(_ *functionLowerer, ins *wasmir.Instruction, operan
 		if len(operands) != 5 {
 			return false
 		}
-		for i := 0; i < 4; i++ {
+		for i := range 4 {
 			lane, ok := lowerI32ConstOperand(operands[i+1])
 			if !ok {
 				return false
@@ -3367,7 +3367,7 @@ func decodeV128ConstOperands(_ *functionLowerer, ins *wasmir.Instruction, operan
 		if len(operands) != 3 {
 			return false
 		}
-		for i := 0; i < 2; i++ {
+		for i := range 2 {
 			lane, ok := lowerI64ConstOperand(operands[i+1])
 			if !ok {
 				return false
@@ -3388,7 +3388,7 @@ func decodeV128ConstOperands(_ *functionLowerer, ins *wasmir.Instruction, operan
 		if len(operands) != 5 {
 			return false
 		}
-		for i := 0; i < 4; i++ {
+		for i := range 4 {
 			lane, ok := lowerF32ConstOperand(operands[i+1])
 			if !ok {
 				return false
@@ -3404,7 +3404,7 @@ func decodeV128ConstOperands(_ *functionLowerer, ins *wasmir.Instruction, operan
 		if len(operands) != 3 {
 			return false
 		}
-		for i := 0; i < 2; i++ {
+		for i := range 2 {
 			lane, ok := lowerF64ConstOperand(operands[i+1])
 			if !ok {
 				return false
