@@ -2425,7 +2425,7 @@ func matchV128Expected(got [16]byte, want scriptValue) bool {
 
 	switch want.v128Shape {
 	case "f32x4":
-		for i := 0; i < 4; i++ {
+		for i := range 4 {
 			base := i * 4
 			lane := uint32(got[base]) |
 				uint32(got[base+1])<<8 |
@@ -2457,7 +2457,7 @@ func matchV128Expected(got [16]byte, want scriptValue) bool {
 		}
 		return true
 	case "f64x2":
-		for i := 0; i < 2; i++ {
+		for i := range 2 {
 			base := i * 8
 			lane := uint64(got[base]) |
 				uint64(got[base+1])<<8 |

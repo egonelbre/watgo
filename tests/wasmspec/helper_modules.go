@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"text/template"
@@ -502,12 +503,7 @@ func isExnRefType(vt wasmir.ValueType) bool {
 }
 
 func funcTypeHasFloatArgs(sig wasmir.TypeDef) bool {
-	for _, vt := range sig.Params {
-		if isFloatType(vt) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(sig.Params, isFloatType)
 }
 
 // encodeDirectInvokeArgs prepares the ordinary invoke path where the target
@@ -549,7 +545,7 @@ func encodeHelperInvokeArgs(scriptArgs []scriptValue, params []wasmir.ValueType)
 			if arg.kind != valueV128Const {
 				return nil, fmt.Errorf("invoke arg[%d]: v128 helper lowering requires v128.const", i)
 			}
-			for word := 0; word < 4; word++ {
+			for word := range 4 {
 				bits := binary.LittleEndian.Uint32(arg.v128[word*4:])
 				out = append(out, nodeValue{
 					Type: "i32",
