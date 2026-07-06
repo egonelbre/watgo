@@ -1108,7 +1108,7 @@ func (v *bodyValidator) validate() diag.ErrorList {
 				return
 			}
 			wantBase := len(frame.resultTypes) - actualCount
-			for i := 0; i < actualCount; i++ {
+			for i := range actualCount {
 				got := stackValue(frame.entryHeight + i)
 				want := valueAt(frame.resultTypes, wantBase+i)
 				if !matchesExpectedValueInModule(m, got, want) {

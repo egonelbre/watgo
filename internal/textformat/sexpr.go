@@ -1,6 +1,7 @@
 package textformat
 
 import (
+	"slices"
 	"strings"
 )
 
@@ -32,12 +33,7 @@ func (sx *SExpr) IsTokenAny(kinds ...tokenName) bool {
 	if sx == nil || !sx.IsToken() {
 		return false
 	}
-	for _, k := range kinds {
-		if sx.tok.name == k {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(kinds, sx.tok.name)
 }
 
 // IsKeywordToken reports whether sx is a KEYWORD token with the given value.

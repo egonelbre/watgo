@@ -4558,7 +4558,7 @@ func extendI8x16ToI16x8(kind wasmir.InstrKind, vec [16]byte) [16]byte {
 	signed := kind == wasmir.InstrI16x8ExtendLowI8x16S || kind == wasmir.InstrI16x8ExtendHighI8x16S
 
 	var out [16]byte
-	for lane := 0; lane < 8; lane++ {
+	for lane := range 8 {
 		raw := vec[start+lane]
 		var result uint16
 		if signed {
@@ -4581,7 +4581,7 @@ func extendI16x8ToI32x4(kind wasmir.InstrKind, vec [16]byte) [16]byte {
 	signed := kind == wasmir.InstrI32x4ExtendLowI16x8S || kind == wasmir.InstrI32x4ExtendHighI16x8S
 
 	var out [16]byte
-	for lane := 0; lane < 4; lane++ {
+	for lane := range 4 {
 		raw := binary.LittleEndian.Uint16(vec[start+lane*2 : start+lane*2+2])
 		var result uint32
 		if signed {
@@ -4604,7 +4604,7 @@ func extendI32x4ToI64x2(kind wasmir.InstrKind, vec [16]byte) [16]byte {
 	signed := kind == wasmir.InstrI64x2ExtendLowI32x4S || kind == wasmir.InstrI64x2ExtendHighI32x4S
 
 	var out [16]byte
-	for lane := 0; lane < 2; lane++ {
+	for lane := range 2 {
 		raw := binary.LittleEndian.Uint32(vec[start+lane*4 : start+lane*4+4])
 		var result uint64
 		if signed {
@@ -4623,7 +4623,7 @@ func extaddPairwiseI8x16ToI16x8(kind wasmir.InstrKind, vec [16]byte) [16]byte {
 	signed := kind == wasmir.InstrI16x8ExtaddPairwiseI8x16S
 
 	var out [16]byte
-	for lane := 0; lane < 8; lane++ {
+	for lane := range 8 {
 		a := vec[lane*2]
 		b := vec[lane*2+1]
 		var result uint16
@@ -4643,7 +4643,7 @@ func extaddPairwiseI16x8ToI32x4(kind wasmir.InstrKind, vec [16]byte) [16]byte {
 	signed := kind == wasmir.InstrI32x4ExtaddPairwiseI16x8S
 
 	var out [16]byte
-	for lane := 0; lane < 4; lane++ {
+	for lane := range 4 {
 		a := binary.LittleEndian.Uint16(vec[lane*4 : lane*4+2])
 		b := binary.LittleEndian.Uint16(vec[lane*4+2 : lane*4+4])
 		var result uint32
@@ -4741,7 +4741,7 @@ func convertI32x4ToF32x4(kind wasmir.InstrKind, vec [16]byte) [16]byte {
 // convertI32x4ToF64x2 converts the low two i32 lanes to f64 lanes.
 func convertI32x4ToF64x2(kind wasmir.InstrKind, vec [16]byte) [16]byte {
 	var out [16]byte
-	for lane := 0; lane < 2; lane++ {
+	for lane := range 2 {
 		raw := binary.LittleEndian.Uint32(vec[lane*4 : lane*4+4])
 		var result float64
 		switch kind {
@@ -4758,7 +4758,7 @@ func convertI32x4ToF64x2(kind wasmir.InstrKind, vec [16]byte) [16]byte {
 // promoteLowF32x4ToF64x2 promotes the low two f32 lanes to f64 lanes.
 func promoteLowF32x4ToF64x2(vec [16]byte) [16]byte {
 	var out [16]byte
-	for lane := 0; lane < 2; lane++ {
+	for lane := range 2 {
 		raw := binary.LittleEndian.Uint32(vec[lane*4 : lane*4+4])
 		binary.LittleEndian.PutUint64(out[lane*8:lane*8+8], promoteF32BitsToF64Bits(raw))
 	}
@@ -4769,7 +4769,7 @@ func promoteLowF32x4ToF64x2(vec [16]byte) [16]byte {
 // zero to the high f32 lanes.
 func demoteF64x2ToF32x4Zero(vec [16]byte) [16]byte {
 	var out [16]byte
-	for lane := 0; lane < 2; lane++ {
+	for lane := range 2 {
 		raw := binary.LittleEndian.Uint64(vec[lane*8 : lane*8+8])
 		binary.LittleEndian.PutUint32(out[lane*4:lane*4+4], demoteF64BitsToF32Bits(raw))
 	}
@@ -4797,7 +4797,7 @@ func truncSatF32x4ToI32x4(kind wasmir.InstrKind, vec [16]byte) [16]byte {
 // lanes and writes zero to the high i32 lanes.
 func truncSatF64x2ToI32x4Zero(kind wasmir.InstrKind, vec [16]byte) [16]byte {
 	var out [16]byte
-	for lane := 0; lane < 2; lane++ {
+	for lane := range 2 {
 		v := math.Float64frombits(binary.LittleEndian.Uint64(vec[lane*8 : lane*8+8]))
 		var result int32
 		switch kind {
@@ -4878,7 +4878,7 @@ func bitwiseV128(kind wasmir.InstrKind, lhs [16]byte, rhs [16]byte) [16]byte {
 // signed or unsigned saturation.
 func narrowI16x8ToI8x16(kind wasmir.InstrKind, lhs [16]byte, rhs [16]byte) [16]byte {
 	var out [16]byte
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		vec := lhs
 		lane := i
 		if i >= 8 {
@@ -4899,7 +4899,7 @@ func narrowI16x8ToI8x16(kind wasmir.InstrKind, lhs [16]byte, rhs [16]byte) [16]b
 // signed or unsigned saturation.
 func narrowI32x4ToI16x8(kind wasmir.InstrKind, lhs [16]byte, rhs [16]byte) [16]byte {
 	var out [16]byte
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		vec := lhs
 		lane := i
 		if i >= 4 {
@@ -5045,10 +5045,7 @@ func q15mulrSatI16x8(lhs [16]byte, rhs [16]byte) [16]byte {
 	for i := 0; i < len(out); i += 2 {
 		a := int32(int16(binary.LittleEndian.Uint16(lhs[i : i+2])))
 		b := int32(int16(binary.LittleEndian.Uint16(rhs[i : i+2])))
-		result := (a*b + 0x4000) >> 15
-		if result > 32767 {
-			result = 32767
-		}
+		result := min((a*b+0x4000)>>15, 32767)
 		binary.LittleEndian.PutUint16(out[i:i+2], uint16(int16(result)))
 	}
 	return out
@@ -5064,7 +5061,7 @@ func extmulI8x16ToI16x8(kind wasmir.InstrKind, lhs [16]byte, rhs [16]byte) [16]b
 	signed := kind == wasmir.InstrI16x8ExtmulLowI8x16S || kind == wasmir.InstrI16x8ExtmulHighI8x16S
 
 	var out [16]byte
-	for lane := 0; lane < 8; lane++ {
+	for lane := range 8 {
 		a := lhs[start+lane]
 		b := rhs[start+lane]
 		var result uint16
@@ -5088,7 +5085,7 @@ func extmulI16x8ToI32x4(kind wasmir.InstrKind, lhs [16]byte, rhs [16]byte) [16]b
 	signed := kind == wasmir.InstrI32x4ExtmulLowI16x8S || kind == wasmir.InstrI32x4ExtmulHighI16x8S
 
 	var out [16]byte
-	for lane := 0; lane < 4; lane++ {
+	for lane := range 4 {
 		a := binary.LittleEndian.Uint16(lhs[start+lane*2 : start+lane*2+2])
 		b := binary.LittleEndian.Uint16(rhs[start+lane*2 : start+lane*2+2])
 		var result uint32
@@ -5112,7 +5109,7 @@ func extmulI32x4ToI64x2(kind wasmir.InstrKind, lhs [16]byte, rhs [16]byte) [16]b
 	signed := kind == wasmir.InstrI64x2ExtmulLowI32x4S || kind == wasmir.InstrI64x2ExtmulHighI32x4S
 
 	var out [16]byte
-	for lane := 0; lane < 2; lane++ {
+	for lane := range 2 {
 		a := binary.LittleEndian.Uint32(lhs[start+lane*4 : start+lane*4+4])
 		b := binary.LittleEndian.Uint32(rhs[start+lane*4 : start+lane*4+4])
 		var result uint64
@@ -5130,7 +5127,7 @@ func extmulI32x4ToI64x2(kind wasmir.InstrKind, lhs [16]byte, rhs [16]byte) [16]b
 // into one i32 lane.
 func dotI16x8ToI32x4(lhs [16]byte, rhs [16]byte) [16]byte {
 	var out [16]byte
-	for lane := 0; lane < 4; lane++ {
+	for lane := range 4 {
 		i := lane * 4
 		a0 := int32(int16(binary.LittleEndian.Uint16(lhs[i : i+2])))
 		b0 := int32(int16(binary.LittleEndian.Uint16(rhs[i : i+2])))
@@ -5145,7 +5142,7 @@ func dotI16x8ToI32x4(lhs [16]byte, rhs [16]byte) [16]byte {
 // choice: signed i8 pairs accumulated into signed i16 lanes.
 func relaxedDotI8x16ToI16x8(lhs [16]byte, rhs [16]byte) [16]byte {
 	var out [16]byte
-	for lane := 0; lane < 8; lane++ {
+	for lane := range 8 {
 		i := lane * 2
 		a0 := int16(int8(lhs[i]))
 		b0 := int16(int8(rhs[i]))
@@ -5160,10 +5157,10 @@ func relaxedDotI8x16ToI16x8(lhs [16]byte, rhs [16]byte) [16]byte {
 // choice: signed i8 groups accumulated into i32 lanes and added to acc.
 func relaxedDotAddI8x16ToI32x4(lhs [16]byte, rhs [16]byte, acc [16]byte) [16]byte {
 	var out [16]byte
-	for lane := 0; lane < 4; lane++ {
+	for lane := range 4 {
 		i := lane * 4
 		sum := int32(0)
-		for j := 0; j < 4; j++ {
+		for j := range 4 {
 			sum += int32(int8(lhs[i+j])) * int32(int8(rhs[i+j]))
 		}
 		addend := binary.LittleEndian.Uint32(acc[lane*4 : lane*4+4])

@@ -170,7 +170,7 @@ func (c *checker) typeIndicesEquivalent(a uint32, b uint32) bool {
 		}
 		c.groupVisiting[groupKey] = true
 		defer delete(c.groupVisiting, groupKey)
-		for i := uint32(0); i < sizeA; i++ {
+		for i := range sizeA {
 			if !c.typeIndicesEquivalentInGroup(startA, startB, sizeA, startA+i, startB+i) {
 				c.groupMemo[groupKey] = false
 				return false
