@@ -3,6 +3,7 @@ package tests
 import (
 	"flag"
 	"fmt"
+	"maps"
 	"math"
 	"path/filepath"
 	"strings"
@@ -60,7 +61,7 @@ func wasmSpecWasmvmSelectedScripts(t *testing.T) []string {
 		return wasmSpecWasmvmDiscoveredScripts(t)
 	}
 	var scripts []string
-	for _, entry := range strings.Split(override, ",") {
+	for entry := range strings.SplitSeq(override, ",") {
 		entry = strings.TrimSpace(entry)
 		if entry == "" {
 			continue
@@ -110,20 +111,15 @@ func wasmSpecWasmvmSpectestImports() wasmvm.Imports {
 			"print_f64":     wasmSpecWasmvmHostFunc([]wasmir.ValueType{wasmir.ValueTypeF64}),
 			"print_i32_f32": wasmSpecWasmvmHostFunc([]wasmir.ValueType{wasmir.ValueTypeI32, wasmir.ValueTypeF32}),
 			"print_f64_f64": wasmSpecWasmvmHostFunc([]wasmir.ValueType{wasmir.ValueTypeF64, wasmir.ValueTypeF64}),
-			"table":         wasmSpecWasmvmTable(wasmir.ValueTypeI32, 10, wasmSpecUint64Ptr(20)),
+			"table":         wasmSpecWasmvmTable(wasmir.ValueTypeI32, 10, new(uint64(20))),
 			"table64":       wasmSpecWasmvmTable(wasmir.ValueTypeI64, 0, nil),
-			"memory":        wasmSpecWasmvmMemory(wasmir.ValueTypeI32, 1, wasmSpecUint64Ptr(2)),
+			"memory":        wasmSpecWasmvmMemory(wasmir.ValueTypeI32, 1, new(uint64(2))),
 			"global_i32":    wasmSpecWasmvmGlobal(wasmvm.I32(666)),
 			"global_i64":    wasmSpecWasmvmGlobal(wasmvm.I64(666)),
 			"global_f32":    wasmSpecWasmvmGlobal(wasmvm.F32(666.6)),
 			"global_f64":    wasmSpecWasmvmGlobal(wasmvm.F64(666.6)),
 		},
 	}
-}
-
-// wasmSpecUint64Ptr returns a pointer to v for inline import limits.
-func wasmSpecUint64Ptr(v uint64) *uint64 {
-	return &v
 }
 
 // wasmSpecWasmvmHostFunc returns a no-op host function with params and no
@@ -475,9 +471,7 @@ func (r *wasmSpecWasmvmRunner) copyRegisteredImports(registerName string, source
 	if r.imports[registerName] == nil {
 		r.imports[registerName] = map[string]wasmvm.Extern{}
 	}
-	for name, ext := range fields {
-		r.imports[registerName][name] = ext
-	}
+	maps.Copy(r.imports[registerName], fields)
 }
 
 // runInvoke invokes an exported function and requires the call to succeed.

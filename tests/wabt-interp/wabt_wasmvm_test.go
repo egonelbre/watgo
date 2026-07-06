@@ -510,8 +510,8 @@ func normalizeWABTWasmvmMessage(message string) string {
 // WABT-style stderr.
 func normalizeWABTWasmvmInstantiateError(err error) string {
 	message := err.Error()
-	if strings.HasPrefix(message, "start function: ") {
-		return "error initializing module: " + normalizeWABTWasmvmMessage(strings.TrimPrefix(message, "start function: "))
+	if after, ok := strings.CutPrefix(message, "start function: "); ok {
+		return "error initializing module: " + normalizeWABTWasmvmMessage(after)
 	}
 	return normalizeWABTWasmvmMessage(message)
 }

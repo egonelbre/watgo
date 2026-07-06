@@ -809,7 +809,7 @@ func wabtV128LineMatches(got, want string) bool {
 		}
 		return true
 	case strings.Contains(gotName, "f32x4"), strings.Contains(wantName, "f32x4"):
-		for i := 0; i < 4; i++ {
+		for i := range 4 {
 			if gotWords[i] == wantWords[i] {
 				continue
 			}
